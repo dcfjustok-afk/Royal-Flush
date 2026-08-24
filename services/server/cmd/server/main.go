@@ -23,6 +23,7 @@ func main() {
 	port := env("PORT", "8080")
 	development := env("ENVIRONMENT", "development") == "development"
 	databaseURL := os.Getenv("DATABASE_URL")
+	readinessChecks := make([]func(context.Context) error, 0, 2)
 	var database *infra.Postgres
 	if databaseURL != "" {
 		startupContext, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -37,6 +38,7 @@ func main() {
 			os.Exit(1)
 		}
 		defer database.Close()
+		readinessChecks = append(readinessChecks, database.Ping)
 	} else if !development {
 		logger.Error("DATABASE_URL is required outside development")
 		os.Exit(1)
@@ -59,6 +61,7 @@ func main() {
 		}
 		redisClient = client
 		roomLease = infra.NewRoomLease(client, "")
+		readinessChecks = append(readinessChecks, func(ctx context.Context) error { return client.Ping(ctx).Err() })
 		defer redisClient.Close()
 	} else if !development {
 		logger.Error("REDIS_URL is required outside development")
@@ -79,9 +82,17 @@ func main() {
 		Development:    development,
 		AllowedOrigins: splitCSV(os.Getenv("ALLOWED_ORIGINS")),
 		Voice:          voice.Config{URL: os.Getenv("LIVEKIT_URL"), APIKey: os.Getenv("LIVEKIT_API_KEY"), APISecret: os.Getenv("LIVEKIT_API_SECRET")},
-		RoomLease:      roomLease,
-		InstanceID:     instanceID,
-		AdminUserIDs:   stringSet(splitCSV(os.Getenv("ADMIN_USER_IDS"))),
+		Readiness: func(ctx context.Context) error {
+			for _, check := range readinessChecks {
+				if err := check(ctx); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+		RoomLease:    roomLease,
+		InstanceID:   instanceID,
+		AdminUserIDs: stringSet(splitCSV(os.Getenv("ADMIN_USER_IDS"))),
 	}
 	if database != nil {
 		applicationConfig.ScoreStore = database

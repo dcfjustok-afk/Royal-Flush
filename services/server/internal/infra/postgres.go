@@ -40,6 +40,10 @@ func (p *Postgres) Pool() *pgxpool.Pool {
 	return p.pool
 }
 
+func (p *Postgres) Ping(ctx context.Context) error {
+	return p.pool.Ping(ctx)
+}
+
 func (p *Postgres) AppendRoomEvent(ctx context.Context, actorUserID string, event room.Envelope) error {
 	ctx, cancel := context.WithTimeout(ctx, postgresOperationTimeout)
 	defer cancel()

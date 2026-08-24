@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,32 @@ import (
 	"github.com/coder/websocket/wsjson"
 	"github.com/royal-flush/royal-flush/services/server/internal/room"
 )
+
+func TestReadinessEndpoint(t *testing.T) {
+	t.Run("ready", func(t *testing.T) {
+		application := New(Config{Development: true}, nil)
+		t.Cleanup(application.Close)
+		server := httptest.NewServer(application.Handler())
+		defer server.Close()
+		response := request(t, server.Client(), http.MethodGet, server.URL+"/api/v1/ready", nil, nil)
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("ready status = %d", response.StatusCode)
+		}
+	})
+
+	t.Run("dependency unavailable", func(t *testing.T) {
+		application := New(Config{Development: true, Readiness: func(context.Context) error { return errors.New("dependency unavailable") }}, nil)
+		t.Cleanup(application.Close)
+		server := httptest.NewServer(application.Handler())
+		defer server.Close()
+		response := request(t, server.Client(), http.MethodGet, server.URL+"/api/v1/ready", nil, nil)
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusServiceUnavailable {
+			t.Fatalf("not-ready status = %d", response.StatusCode)
+		}
+	})
+}
 
 func TestHTTPScoreRoomAndAdminFlows(t *testing.T) {
 	server := httptest.NewServer(New(Config{Development: true}, nil).Handler())

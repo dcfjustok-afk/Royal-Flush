@@ -24,6 +24,7 @@ type Config struct {
 	Development    bool
 	AllowedOrigins []string
 	Voice          voice.Config
+	Readiness      func(context.Context) error
 	ScoreStore     score.Store
 	RoomStore      room.Store
 	RoomLease      room.Lease
@@ -83,6 +84,7 @@ func (s *Server) routes() http.Handler {
 	router.Get("/api/v1/health", func(writer http.ResponseWriter, request *http.Request) {
 		writeJSON(writer, http.StatusOK, map[string]any{"status": "ok", "time": time.Now().UTC()})
 	})
+	router.Get("/api/v1/ready", s.readiness)
 	router.Post("/api/v1/auth/otp/request", s.requestOTP)
 	router.Post("/api/v1/auth/otp/verify", s.verifyOTP)
 	router.Get("/api/v1/rooms/{roomID}/public", s.publicRoom)
@@ -109,6 +111,19 @@ func (s *Server) routes() http.Handler {
 		protected.Get("/api/v1/admin/audit-log", s.adminAudits)
 	})
 	return router
+}
+
+func (s *Server) readiness(writer http.ResponseWriter, request *http.Request) {
+	ctx, cancel := context.WithTimeout(request.Context(), 3*time.Second)
+	defer cancel()
+	if s.config.Readiness != nil {
+		if err := s.config.Readiness(ctx); err != nil {
+			s.log.Warn("readiness check failed", "error", err)
+			writeJSON(writer, http.StatusServiceUnavailable, map[string]any{"status": "not_ready", "time": time.Now().UTC()})
+			return
+		}
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"status": "ready", "time": time.Now().UTC()})
 }
 
 func (s *Server) authenticate(next http.Handler) http.Handler {
