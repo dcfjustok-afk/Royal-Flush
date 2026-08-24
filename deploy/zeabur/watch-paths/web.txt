@@ -1,0 +1,9 @@
+/apps/web
+/apps/admin/package.json
+/packages/contracts
+/deploy/nginx/player.conf
+/Dockerfile.web
+/package.json
+/package-lock.json
+/tsconfig.base.json
+/.dockerignore
