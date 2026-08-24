@@ -175,3 +175,35 @@ html { scrollbar-color:var(--line) var(--ink); caret-color:var(--mint); }
 @media (prefers-reduced-motion: reduce) {
   .spin { animation:none; }
 }
+
+/* Standalone operator authentication */
+.admin-auth-shell { display:grid; min-width:720px; min-height:100vh; grid-template-rows:76px 1fr 54px; background:var(--ink); }
+.admin-auth-header { display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--line); background:#161714; padding:0 30px; }
+.admin-auth-header .admin-brand { padding:0; }
+.admin-auth-header > span { color:var(--muted); font-size:11px; }
+.admin-auth-main { display:grid; place-items:center; padding:48px 24px; }
+.admin-login,.auth-state { width:440px; border-top:1px solid var(--line); border-bottom:1px solid var(--line); padding:30px 0; }
+.auth-title { display:flex; align-items:flex-start; gap:14px; margin-bottom:26px; }
+.auth-title > svg { width:32px; height:32px; color:var(--mint); }
+.auth-title h1,.auth-state h1 { font-size:22px; line-height:1.25; }
+.auth-title p,.auth-state p { margin-top:6px; color:var(--muted); font-size:12px; line-height:1.6; }
+.admin-login label { display:block; margin-top:16px; color:var(--muted); font-size:11px; }
+.admin-login label small { margin-left:5px; color:#73756d; }
+.admin-login input { width:100%; height:46px; margin-top:7px; border:1px solid var(--line); border-radius:4px; background:#151613; color:var(--bone); padding:0 13px; font-size:14px; }
+.admin-login input::placeholder { color:#85877f; }
+.admin-login input:focus { border-color:var(--mint); box-shadow:inset 0 0 0 1px var(--mint); outline:0; }
+.admin-login footer { display:flex; justify-content:flex-end; gap:8px; margin-top:24px; }
+.auth-submit { display:inline-flex; min-width:136px; min-height:44px; align-items:center; justify-content:center; gap:8px; border:1px solid #c84639; border-radius:4px; background:var(--red); color:white; padding:0 18px; font-size:12px; font-weight:700; }
+.dev-code { display:flex; min-height:40px; align-items:center; gap:8px; margin-top:18px; border-top:1px solid #56451f; border-bottom:1px solid #56451f; background:#211c11; color:#d9bc73; padding:0 12px; font-size:11px; }
+.dev-code strong { margin-left:auto; color:#f0d88d; font:700 18px/1 var(--numeric); }
+.auth-error { margin-top:14px; color:#ff958a; font-size:11px; line-height:1.5; }
+.auth-state { display:grid; justify-items:center; text-align:center; }
+.auth-state > svg { width:34px; height:34px; margin-bottom:18px; color:var(--mint); }
+.auth-state.forbidden > svg { color:var(--red); }
+.auth-state .tool-button { margin-top:22px; }
+.admin-auth-footer { display:flex; align-items:center; justify-content:space-between; border-top:1px solid var(--line); color:#85877f; padding:0 30px; font-size:10px; }
+.operator-identity { display:flex; min-width:150px; align-items:center; gap:9px; border-left:1px solid var(--line); padding-left:14px; }
+.operator-identity > svg { color:var(--mint); }
+.operator-identity > span { display:flex; flex-direction:column; gap:3px; }
+.operator-identity strong { font-size:11px; }
+.operator-identity small { color:var(--muted); font:600 10px/1 var(--numeric); }

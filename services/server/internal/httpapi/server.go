@@ -31,6 +31,7 @@ type Config struct {
 	InstanceID     string
 	Operations     operations.Store
 	AdminUserIDs   map[string]bool
+	AdminPhones    map[string]bool
 }
 
 type Server struct {
@@ -149,7 +150,7 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			writeProblem(writer, http.StatusUnauthorized, "authentication_required", "请先完成手机号验证码登录")
 			return
 		}
-		if s.config.AdminUserIDs[user.ID] {
+		if s.config.AdminUserIDs[user.ID] || s.config.AdminPhones[user.Phone] {
 			for _, permission := range []string{"score:reset-all", "admin:read", "user:ban", "report:manage"} {
 				user.Permissions[permission] = true
 			}

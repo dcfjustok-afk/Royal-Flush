@@ -93,6 +93,7 @@ func main() {
 		RoomLease:    roomLease,
 		InstanceID:   instanceID,
 		AdminUserIDs: stringSet(splitCSV(os.Getenv("ADMIN_USER_IDS"))),
+		AdminPhones:  stringSet(splitCSV(os.Getenv("ADMIN_PHONES"))),
 	}
 	if database != nil {
 		applicationConfig.ScoreStore = database

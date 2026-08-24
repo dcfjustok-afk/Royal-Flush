@@ -1,6 +1,24 @@
 const baseUrl = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
 export const apiMode = import.meta.env.VITE_USE_API === "true";
 
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+export interface SessionUser {
+  id: string;
+  phone: string;
+  nickname: string;
+  permissions: Record<string, boolean>;
+}
+
 export interface OperationsUser {
   id: string;
   phone: string;
@@ -90,13 +108,22 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers,
   });
   if (!response.ok) {
-    const problem = (await response.json().catch(() => null)) as { message?: string } | null;
-    throw new Error(problem?.message ?? `请求失败 (${response.status})`);
+    const problem = (await response.json().catch(() => null)) as { code?: string; message?: string } | null;
+    throw new ApiError(problem?.message ?? `请求失败 (${response.status})`, response.status, problem?.code ?? "request_failed");
   }
   return response.json() as Promise<T>;
 }
 
 export const adminApi = {
+  requestOtp: (phone: string) => request<{ expiresAt: string; expiresIn: number; devCode?: string }>("/auth/otp/request", {
+    method: "POST",
+    body: JSON.stringify({ phone }),
+  }),
+  verifyOtp: (phone: string, code: string, nickname: string) => request<{ user: SessionUser; balance: number }>("/auth/otp/verify", {
+    method: "POST",
+    body: JSON.stringify({ phone, code, nickname }),
+  }),
+  me: () => request<{ user: SessionUser; balance: number; activeRoomId?: string }>("/me"),
   epochs: () => request<{ epochs: Array<{ id: number; reason: string; administrator: string; createdAt: string }> }>("/admin/score-epochs"),
   resetScores: (reason: string) => request<{ epoch: number; baseScore: 1000; duplicate: boolean }>("/admin/score-resets", {
     method: "POST",

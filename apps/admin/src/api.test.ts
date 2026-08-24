@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { adminApi } from "./api";
+import { adminApi, ApiError } from "./api";
 
 describe("admin score API", () => {
   afterEach(() => {
@@ -44,5 +44,20 @@ describe("admin score API", () => {
     const [reportURL, reportInit] = fetchMock.mock.calls[1] as [string, RequestInit];
     expect(reportURL).toBe("/api/v1/admin/reports/r1/resolution");
     expect(JSON.parse(String(reportInit.body))).toMatchObject({ status: "resolved", reason: "已完成核查", requestId: expect.any(String) });
+  });
+
+  it("preserves authentication error status and code", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      code: "authentication_required",
+      message: "请先完成手机号验证码登录",
+    }), { status: 401, headers: { "Content-Type": "application/json" } })));
+
+    const error = await adminApi.me().catch((reason: unknown) => reason);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({
+      status: 401,
+      code: "authentication_required",
+      message: "请先完成手机号验证码登录",
+    });
   });
 });

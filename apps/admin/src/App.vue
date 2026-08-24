@@ -1,19 +1,28 @@
 <script setup lang="ts">
 import {
-  Activity, AlertTriangle, Ban, CheckCircle2, ChevronDown, CircleUserRound, Clock3,
+  Activity, AlertTriangle, Ban, CheckCircle2, CircleUserRound, Clock3,
   DoorOpen, FileClock, Gauge, Inbox, LoaderCircle, Radio, RefreshCw, RotateCcw,
-  Search, ShieldCheck, Unlock, Users, WifiOff, X, XCircle,
+  Search, Send, ShieldAlert, ShieldCheck, Smartphone, Unlock, Users, WifiOff, X, XCircle,
 } from "@lucide/vue";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
-  adminApi, apiMode,
-  type AdminAudit, type AdminRoom, type AdminRoomSnapshot, type OperationsUser, type Report,
+  adminApi, ApiError, apiMode,
+  type AdminAudit, type AdminRoom, type AdminRoomSnapshot, type OperationsUser, type Report, type SessionUser,
 } from "./api";
 
 type Section = "overview" | "users" | "rooms" | "reports" | "audit";
 
 const now = new Date();
 const activeSection = ref<Section>("overview");
+const authState = ref<"checking" | "anonymous" | "authorized" | "forbidden">(apiMode ? "checking" : "authorized");
+const operator = ref<SessionUser | null>(apiMode ? null : { id: "local-admin", phone: "", nickname: "local-admin", permissions: { "admin:read": true } });
+const loginPhone = ref("");
+const loginCode = ref("");
+const loginNickname = ref("");
+const otpRequested = ref(false);
+const devCode = ref("");
+const authBusy = ref(false);
+const authError = ref("");
 const search = ref("");
 const loading = ref(false);
 const loadErrors = ref<string[]>([]);
@@ -68,29 +77,93 @@ const filteredUsers = computed(() => {
 const openReports = computed(() => reports.value.filter((report) => report.status === "open" || report.status === "reviewing"));
 const playingRooms = computed(() => rooms.value.filter((room) => room.status === "playing").length);
 const onlinePlayers = computed(() => rooms.value.reduce((total, room) => total + room.onlinePlayers, 0));
+const phoneValid = computed(() => /^1[3-9]\d{9}$/.test(loginPhone.value));
+const codeValid = computed(() => /^\d{6}$/.test(loginCode.value));
 
 function errorMessage(reason: unknown, fallback: string) {
   return reason instanceof Error ? reason.message : fallback;
 }
 
 async function loadAll() {
-  if (!apiMode) return;
+  if (!apiMode || authState.value !== "authorized") return;
   loading.value = true;
   loadErrors.value = [];
   const [epochResult, roomResult, userResult, reportResult, auditResult] = await Promise.allSettled([
     adminApi.epochs(), adminApi.rooms(), adminApi.users(search.value.trim()), adminApi.reports(), adminApi.audits(),
   ]);
-  if (epochResult.status === "fulfilled" && epochResult.value.epochs[0]) epoch.value = epochResult.value.epochs[0].id;
+  if (epochResult.status === "fulfilled" && epochResult.value.epochs?.[0]) epoch.value = epochResult.value.epochs[0].id;
   else if (epochResult.status === "rejected") loadErrors.value.push(`积分周期：${errorMessage(epochResult.reason, "加载失败")}`);
-  if (roomResult.status === "fulfilled") rooms.value = roomResult.value.rooms;
+  if (roomResult.status === "fulfilled") rooms.value = roomResult.value.rooms ?? [];
   else loadErrors.value.push(`活跃房间：${errorMessage(roomResult.reason, "加载失败")}`);
-  if (userResult.status === "fulfilled") users.value = userResult.value.users;
+  if (userResult.status === "fulfilled") users.value = userResult.value.users ?? [];
   else loadErrors.value.push(`用户列表：${errorMessage(userResult.reason, "加载失败")}`);
-  if (reportResult.status === "fulfilled") reports.value = reportResult.value.reports;
+  if (reportResult.status === "fulfilled") reports.value = reportResult.value.reports ?? [];
   else loadErrors.value.push(`举报队列：${errorMessage(reportResult.reason, "加载失败")}`);
-  if (auditResult.status === "fulfilled") audits.value = auditResult.value.audits;
+  if (auditResult.status === "fulfilled") audits.value = auditResult.value.audits ?? [];
   else loadErrors.value.push(`审计记录：${errorMessage(auditResult.reason, "加载失败")}`);
   loading.value = false;
+}
+
+function acceptOperator(user: SessionUser) {
+  operator.value = user;
+  const authorized = Boolean(user.permissions["admin:read"]);
+  authState.value = authorized ? "authorized" : "forbidden";
+  return authorized;
+}
+
+async function initialize() {
+  if (!apiMode) return;
+  authState.value = "checking";
+  authError.value = "";
+  try {
+    if (acceptOperator((await adminApi.me()).user)) await loadAll();
+  } catch (reason) {
+    if (reason instanceof ApiError && reason.status === 401) authState.value = "anonymous";
+    else {
+      authState.value = "anonymous";
+      authError.value = errorMessage(reason, "运营身份暂时无法验证，请重试");
+    }
+  }
+}
+
+async function requestAdminOtp() {
+  if (!phoneValid.value || authBusy.value) return;
+  authBusy.value = true;
+  authError.value = "";
+  try {
+    const challenge = await adminApi.requestOtp(loginPhone.value);
+    otpRequested.value = true;
+    devCode.value = challenge.devCode ?? "";
+  } catch (reason) {
+    authError.value = errorMessage(reason, "验证码发送失败，请稍后重试");
+  } finally {
+    authBusy.value = false;
+  }
+}
+
+async function verifyAdminOtp() {
+  if (!phoneValid.value || !codeValid.value || authBusy.value) return;
+  authBusy.value = true;
+  authError.value = "";
+  try {
+    await adminApi.verifyOtp(loginPhone.value, loginCode.value, loginNickname.value.trim());
+    if (acceptOperator((await adminApi.me()).user)) await loadAll();
+  } catch (reason) {
+    authError.value = errorMessage(reason, "登录失败，请检查验证码后重试");
+  } finally {
+    authBusy.value = false;
+  }
+}
+
+function useAnotherPhone() {
+  authState.value = "anonymous";
+  operator.value = null;
+  loginPhone.value = "";
+  loginCode.value = "";
+  loginNickname.value = "";
+  otpRequested.value = false;
+  devCode.value = "";
+  authError.value = "";
 }
 
 async function refreshSection() {
@@ -98,10 +171,10 @@ async function refreshSection() {
   loading.value = true;
   loadErrors.value = [];
   try {
-    if (activeSection.value === "users") users.value = (await adminApi.users(search.value.trim())).users;
-    else if (activeSection.value === "reports") reports.value = (await adminApi.reports()).reports;
-    else if (activeSection.value === "audit") audits.value = (await adminApi.audits()).audits;
-    else rooms.value = (await adminApi.rooms()).rooms;
+    if (activeSection.value === "users") users.value = (await adminApi.users(search.value.trim())).users ?? [];
+    else if (activeSection.value === "reports") reports.value = (await adminApi.reports()).reports ?? [];
+    else if (activeSection.value === "audit") audits.value = (await adminApi.audits()).audits ?? [];
+    else rooms.value = (await adminApi.rooms()).rooms ?? [];
   } catch (reason) {
     loadErrors.value = [errorMessage(reason, "刷新失败，请稍后重试")];
   } finally {
@@ -229,12 +302,12 @@ watch(search, () => {
   if (!apiMode) return;
   window.clearTimeout(searchTimer);
   searchTimer = window.setTimeout(async () => {
-    try { users.value = (await adminApi.users(search.value.trim())).users; }
+    try { users.value = (await adminApi.users(search.value.trim())).users ?? []; }
     catch (reason) { loadErrors.value = [errorMessage(reason, "用户搜索失败")]; }
   }, 300);
 });
 
-onMounted(loadAll);
+onMounted(initialize);
 onBeforeUnmount(() => {
   window.clearTimeout(resetTimer);
   window.clearTimeout(searchTimer);
@@ -242,7 +315,30 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="admin-shell">
+  <div v-if="apiMode && authState !== 'authorized'" class="admin-auth-shell">
+    <header class="admin-auth-header"><a class="admin-brand" href="/"><span>RF</span><strong>Royal Flush<small>运营控制台</small></strong></a><span>仅限授权运营人员</span></header>
+    <main class="admin-auth-main">
+      <section v-if="authState === 'checking'" class="auth-state" aria-live="polite"><LoaderCircle class="spin" /><h1>正在验证运营身份</h1><p>正在读取当前会话与权限。</p></section>
+      <section v-else-if="authState === 'forbidden'" class="auth-state forbidden" role="alert"><ShieldAlert /><h1>当前账号没有运营权限</h1><p>{{ operator ? maskPhone(operator.phone) : '该账号' }} 已完成登录，但不在授权运营名单中。</p><button class="tool-button" type="button" @click="useAnotherPhone"><Smartphone />使用其他手机号</button></section>
+      <form v-else class="admin-login" @submit.prevent="otpRequested ? verifyAdminOtp() : requestAdminOtp()">
+        <div class="auth-title"><ShieldCheck /><div><h1>运营身份验证</h1><p>使用已授权的手机号进入控制台。</p></div></div>
+        <label>手机号<input v-model.trim="loginPhone" inputmode="numeric" autocomplete="tel" maxlength="11" placeholder="请输入 11 位手机号" :disabled="authBusy" /></label>
+        <template v-if="otpRequested">
+          <label>验证码<input v-model.trim="loginCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 位验证码" :disabled="authBusy" /></label>
+          <label>运营昵称 <small>选填</small><input v-model.trim="loginNickname" autocomplete="nickname" maxlength="20" placeholder="用于审计记录" :disabled="authBusy" /></label>
+          <p v-if="devCode" class="dev-code"><Radio />预览环境验证码 <strong>{{ devCode }}</strong></p>
+        </template>
+        <p v-if="authError" class="auth-error" role="alert">{{ authError }}</p>
+        <footer>
+          <button v-if="otpRequested" class="tool-button" type="button" :disabled="authBusy" @click="otpRequested = false; loginCode = ''; devCode = ''; authError = ''">修改手机号</button>
+          <button class="auth-submit" type="submit" :disabled="authBusy || !phoneValid || (otpRequested && !codeValid)"><LoaderCircle v-if="authBusy" class="spin" /><Send v-else />{{ authBusy ? '请稍候' : otpRequested ? '验证并进入' : '获取验证码' }}</button>
+        </footer>
+      </form>
+    </main>
+    <footer class="admin-auth-footer"><span>积分仅用于娱乐计分，不具备货币价值</span><span>操作将写入永久审计记录</span></footer>
+  </div>
+
+  <div v-else class="admin-shell">
     <aside class="admin-sidebar">
       <a class="admin-brand" href="/"><span>RF</span><strong>Royal Flush<small>运营控制台</small></strong></a>
       <nav aria-label="运营导航">
@@ -258,7 +354,7 @@ onBeforeUnmount(() => {
     <main class="admin-main">
       <header class="admin-topbar">
         <div><h1>{{ { overview: '运行概览', users: '用户与积分', rooms: '活跃房间', reports: '举报处理', audit: '审计记录' }[activeSection] }}</h1><span>{{ new Intl.DateTimeFormat('zh-CN', { dateStyle: 'long', timeZone: 'Asia/Shanghai' }).format(now) }} · Asia/Shanghai</span></div>
-        <div class="operator"><span class="service-live">{{ apiMode ? '实时接口' : '演示数据' }}</span><button type="button"><CircleUserRound />local-admin<ChevronDown /></button></div>
+        <div class="operator"><span class="service-live">{{ apiMode ? '实时接口' : '演示数据' }}</span><div class="operator-identity"><CircleUserRound /><span><strong>{{ operator?.nickname ?? '运营员' }}</strong><small>{{ operator?.phone ? maskPhone(operator.phone) : 'local-admin' }}</small></span></div></div>
       </header>
 
       <div v-if="loadErrors.length" class="error-band" role="alert"><WifiOff /><span><strong>部分数据未更新</strong>{{ loadErrors.join('；') }}</span><button class="tool-button" type="button" @click="loadAll"><RefreshCw />重试</button></div>

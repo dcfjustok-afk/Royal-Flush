@@ -176,6 +176,42 @@ func TestOTPAndWebSocketSnapshot(t *testing.T) {
 	}
 }
 
+func TestConfiguredAdminPhoneGrantsOperationsPermissions(t *testing.T) {
+	application := New(Config{Development: true, AdminPhones: map[string]bool{"13800138000": true}}, nil)
+	t.Cleanup(application.Close)
+	server := httptest.NewServer(application.Handler())
+	defer server.Close()
+	client := server.Client()
+
+	login := func(phone string) string {
+		t.Helper()
+		response := request(t, client, http.MethodPost, server.URL+"/api/v1/auth/otp/request", map[string]any{"phone": phone}, nil)
+		var challenge struct {
+			DevCode string `json:"devCode"`
+		}
+		decodeResponse(t, response, &challenge)
+		response = request(t, client, http.MethodPost, server.URL+"/api/v1/auth/otp/verify", map[string]any{"phone": phone, "code": challenge.DevCode}, nil)
+		if response.StatusCode != http.StatusOK || len(response.Cookies()) != 1 {
+			t.Fatalf("verify %s status/cookie = %d/%d", phone, response.StatusCode, len(response.Cookies()))
+		}
+		cookie := response.Cookies()[0].String()
+		response.Body.Close()
+		return cookie
+	}
+
+	response := request(t, client, http.MethodGet, server.URL+"/api/v1/admin/users", nil, map[string]string{"Cookie": login("13800138000")})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("configured admin phone status = %d: %s", response.StatusCode, readBody(response))
+	}
+	response.Body.Close()
+
+	response = request(t, client, http.MethodGet, server.URL+"/api/v1/admin/users", nil, map[string]string{"Cookie": login("13900139000")})
+	if response.StatusCode != http.StatusForbidden {
+		t.Fatalf("unconfigured phone status = %d: %s", response.StatusCode, readBody(response))
+	}
+	response.Body.Close()
+}
+
 func TestWebSocketReconnectStartsWithCurrentAuthoritativeSnapshot(t *testing.T) {
 	application := New(Config{Development: true}, nil)
 	t.Cleanup(application.Close)
