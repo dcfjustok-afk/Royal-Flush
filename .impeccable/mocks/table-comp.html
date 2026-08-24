@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Royal Flush Table Compositions</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "Microsoft YaHei UI", "PingFang SC", sans-serif;
+        --ink: #11110f;
+        --panel: #1d1e1b;
+        --panel-2: #252622;
+        --bone: #f2efe8;
+        --muted: #aaa89f;
+        --line: #3b3c37;
+        --red: #e45445;
+        --mint: #73c6a0;
+        --amber: #e0b14e;
+        --violet: #8d7ad8;
+      }
+
+      * { box-sizing: border-box; }
+      html, body { width: 100%; min-width: 1180px; height: 100%; margin: 0; overflow: hidden; background: var(--ink); color: var(--bone); }
+      body { min-height: 760px; }
+      button { font: inherit; }
+
+      .app {
+        position: relative;
+        display: grid;
+        grid-template-rows: 68px 44px 1fr 202px;
+        width: 100vw;
+        height: 100vh;
+        min-width: 1180px;
+        min-height: 760px;
+        background: var(--ink);
+        isolation: isolate;
+      }
+
+      .app::before {
+        position: absolute;
+        inset: 0;
+        z-index: -1;
+        background-image: linear-gradient(rgba(242, 239, 232, .025) 1px, transparent 1px);
+        background-size: 100% 44px;
+        content: "";
+      }
+
+      .topbar {
+        display: grid;
+        grid-template-columns: 290px 1fr auto;
+        align-items: center;
+        gap: 28px;
+        padding: 0 28px;
+        border-bottom: 1px solid var(--line);
+        background: #161714;
+      }
+
+      .brand { display: flex; align-items: center; gap: 13px; min-width: 0; }
+      .brand-mark { display: grid; place-items: center; width: 36px; height: 36px; border: 2px solid var(--bone); font: 800 15px/1 Arial, sans-serif; }
+      .brand-name { font-size: 17px; font-weight: 800; }
+      .room-name { color: var(--muted); font-size: 12px; }
+
+      .station { display: flex; align-items: center; justify-content: center; gap: 14px; min-width: 0; }
+      .station strong { font-size: 14px; }
+      .station span { color: var(--muted); font-size: 12px; }
+      .wave { display: flex; align-items: center; gap: 3px; height: 24px; }
+      .wave i { display: block; width: 3px; height: 6px; background: var(--mint); animation: wave 1.1s ease-in-out infinite; }
+      .wave i:nth-child(2) { height: 15px; animation-delay: -.3s; }
+      .wave i:nth-child(3) { height: 22px; animation-delay: -.6s; }
+      .wave i:nth-child(4) { height: 12px; animation-delay: -.8s; }
+      .wave i:nth-child(5) { height: 8px; animation-delay: -.15s; }
+
+      .top-actions { display: flex; align-items: center; gap: 10px; }
+      .status { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+      .status::before { width: 7px; height: 7px; border-radius: 50%; background: var(--mint); content: ""; }
+      .icon-button { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); color: var(--bone); }
+      .icon-button svg { width: 17px; height: 17px; }
+
+      .broadcast {
+        display: grid;
+        grid-template-columns: 112px 1fr auto;
+        align-items: center;
+        gap: 14px;
+        padding: 0 28px;
+        border-bottom: 1px solid #4b332f;
+        background: #271c19;
+        color: #ecd5cf;
+        font-size: 12px;
+      }
+      .broadcast-label { color: var(--red); font-size: 11px; font-weight: 800; }
+      .broadcast time { color: #947b75; font-variant-numeric: tabular-nums; }
+
+      .stage { position: relative; min-height: 0; overflow: hidden; }
+      .stage-rail { position: absolute; top: 22px; right: 28px; display: flex; align-items: center; gap: 18px; z-index: 4; }
+      .rail-stat { display: flex; align-items: baseline; gap: 7px; color: var(--muted); font-size: 11px; }
+      .rail-stat strong { color: var(--bone); font: 700 19px/1 "Arial Narrow", Arial, sans-serif; }
+
+      .table-shell {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: min(820px, 64vw);
+        aspect-ratio: 2.12 / 1;
+        transform: translate(-50%, -47%);
+      }
+
+      .table {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        border: 2px solid #595b54;
+        border-radius: 50%;
+        background: #292a26;
+        box-shadow: 0 22px 60px rgba(0, 0, 0, .38), inset 0 0 0 13px #1a1b18, inset 0 0 0 14px #464842;
+      }
+
+      .table::before, .table::after { position: absolute; content: ""; }
+      .table::before { inset: 14%; border: 1px solid #41423d; border-radius: 50%; }
+      .table::after { width: 64%; height: 1px; background: #3e403a; }
+      .table-center { position: relative; z-index: 1; display: grid; justify-items: center; gap: 14px; }
+      .pot { display: flex; align-items: baseline; gap: 9px; }
+      .pot span { color: var(--muted); font-size: 11px; }
+      .pot strong { font: 800 27px/1 "Arial Narrow", Arial, sans-serif; }
+      .community { display: flex; gap: 9px; }
+      .card { position: relative; width: 54px; height: 74px; padding: 7px; border-radius: 5px; background: var(--bone); color: #171815; box-shadow: 0 7px 14px rgba(0, 0, 0, .22); font: 800 16px/1 Arial, sans-serif; }
+      .card.red { color: #be4439; }
+      .card small { position: absolute; right: 7px; bottom: 7px; font-size: 18px; }
+
+      .seat { position: absolute; z-index: 2; width: 150px; height: 62px; padding: 9px 10px 8px; border: 1px solid #4c4e48; border-radius: 6px; background: #1b1c19; box-shadow: 0 8px 22px rgba(0,0,0,.3); }
+      .seat::after { position: absolute; top: 10px; right: 10px; width: 6px; height: 6px; border-radius: 50%; background: #5d5f58; content: ""; }
+      .seat.speaking { border-color: var(--mint); }
+      .seat.speaking::after { background: var(--mint); box-shadow: 0 0 0 3px rgba(115,198,160,.13); }
+      .seat.turn { border-color: var(--red); }
+      .seat.turn::before { position: absolute; inset: -4px; border: 1px solid rgba(228,84,69,.35); border-radius: 8px; content: ""; }
+      .seat-name { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 700; }
+      .dealer { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--bone); color: var(--ink); font: 800 9px/1 Arial; }
+      .seat-points { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+      .seat-points span { color: #7f8179; font-size: 9px; }
+      .seat-points strong { display: block; margin-top: 2px; color: var(--bone); font: 700 13px/1 "Arial Narrow", Arial; }
+      .seat.s0 { left: 4%; top: 9%; transform: translate(-35%, -75%); }
+      .seat.s1 { left: 50%; top: 0; transform: translate(-50%, -65%); }
+      .seat.s2 { right: 4%; top: 9%; transform: translate(35%, -75%); }
+      .seat.s3 { right: 0; top: 50%; transform: translate(68%, -50%); }
+      .seat.s4 { right: 6%; bottom: 5%; transform: translate(28%, 70%); }
+      .seat.s5 { left: 50%; bottom: 0; transform: translate(-50%, 58%); }
+      .seat.s6 { left: 6%; bottom: 5%; transform: translate(-28%, 70%); }
+      .seat.s7 { left: 0; top: 50%; transform: translate(-68%, -50%); }
+
+      .hole-cards { position: absolute; left: 50%; bottom: -53px; display: flex; transform: translateX(-50%); }
+      .hole-cards .card { width: 39px; height: 54px; padding: 5px; font-size: 12px; }
+      .hole-cards .card + .card { margin-left: -12px; transform: rotate(5deg); }
+
+      .dock {
+        display: grid;
+        grid-template-columns: minmax(210px, 1fr) minmax(510px, 2fr) minmax(280px, 1.2fr);
+        gap: 20px;
+        padding: 18px 28px 20px;
+        border-top: 1px solid var(--line);
+        background: #161714;
+      }
+      .dock-section { min-width: 0; }
+      .section-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; color: var(--muted); font-size: 11px; }
+      .section-title strong { color: var(--bone); font-size: 12px; }
+
+      .voice-card { display: grid; grid-template-columns: 42px 1fr auto; align-items: center; gap: 11px; height: 92px; padding: 0 14px; background: var(--panel); border-radius: 6px; }
+      .avatar { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; background: #353730; color: var(--bone); font-size: 12px; font-weight: 800; }
+      .voice-name { font-size: 12px; font-weight: 700; }
+      .voice-meta { margin-top: 5px; color: var(--mint); font-size: 10px; }
+
+      .chip-row { display: flex; align-items: center; gap: 10px; overflow: hidden; }
+      .chip { flex: 0 0 auto; display: grid; place-items: center; width: 52px; height: 52px; border: 4px dashed rgba(242,239,232,.72); border-radius: 50%; background: #4c4e48; color: white; box-shadow: inset 0 0 0 3px #4c4e48, inset 0 0 0 5px rgba(255,255,255,.15), 0 6px 12px rgba(0,0,0,.28); font: 800 13px/1 "Arial Narrow", Arial; }
+      .chip:nth-child(2) { background: #3d7763; box-shadow: inset 0 0 0 3px #3d7763, inset 0 0 0 5px rgba(255,255,255,.15), 0 6px 12px rgba(0,0,0,.28); }
+      .chip:nth-child(3) { background: #9d493f; box-shadow: inset 0 0 0 3px #9d493f, inset 0 0 0 5px rgba(255,255,255,.15), 0 6px 12px rgba(0,0,0,.28); }
+      .chip:nth-child(4) { background: #6557a0; box-shadow: inset 0 0 0 3px #6557a0, inset 0 0 0 5px rgba(255,255,255,.15), 0 6px 12px rgba(0,0,0,.28); }
+      .chip:nth-child(5) { background: #a27632; box-shadow: inset 0 0 0 3px #a27632, inset 0 0 0 5px rgba(255,255,255,.15), 0 6px 12px rgba(0,0,0,.28); }
+      .chip.ghost { opacity: .3; }
+      .chip-selection { display: flex; justify-content: space-between; align-items: center; margin-top: 13px; color: var(--muted); font-size: 10px; }
+      .chip-selection strong { color: var(--bone); font: 700 18px/1 "Arial Narrow", Arial; }
+
+      .bet-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); }
+      .bet-summary div { padding: 10px 11px; background: var(--panel); }
+      .bet-summary span { display: block; color: var(--muted); font-size: 9px; }
+      .bet-summary strong { display: block; margin-top: 4px; font: 700 16px/1 "Arial Narrow", Arial; }
+      .action-row { display: grid; grid-template-columns: 72px 1fr 1.2fr; gap: 8px; margin-top: 9px; }
+      .action { height: 44px; border: 0; border-radius: 4px; background: #30312d; color: var(--bone); font-size: 12px; font-weight: 800; }
+      .action.call { background: var(--bone); color: var(--ink); }
+      .action.raise { background: var(--red); color: white; }
+
+      .variant-label { position: absolute; left: 28px; top: 136px; z-index: 5; color: #5e6059; font: 700 10px/1 Arial; }
+
+      .app[data-variant="b"] { grid-template-columns: 252px 1fr; grid-template-rows: 68px 44px 1fr 202px; }
+      .app[data-variant="b"] .topbar, .app[data-variant="b"] .broadcast, .app[data-variant="b"] .dock { grid-column: 1 / -1; }
+      .app[data-variant="b"] .stage { grid-column: 2; }
+      .app[data-variant="b"] .table-shell { left: 55%; width: min(740px, 58vw); }
+      .app[data-variant="b"] .side-console { display: block; grid-column: 1; grid-row: 3; border-right: 1px solid var(--line); background: #191a17; }
+
+      .side-console { display: none; padding: 28px 20px; }
+      .console-title { margin: 0 0 22px; font-size: 17px; }
+      .console-block { padding: 15px 0; border-top: 1px solid var(--line); }
+      .console-block span { color: var(--muted); font-size: 10px; }
+      .console-block strong { display: block; margin-top: 5px; font: 700 22px/1 "Arial Narrow", Arial; }
+      .event { display: grid; grid-template-columns: 32px 1fr; gap: 9px; margin-top: 13px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+      .event time { color: #656760; font-variant-numeric: tabular-nums; }
+
+      .app[data-variant="c"] { grid-template-rows: 96px 56px 1fr 174px; }
+      .app[data-variant="c"] .topbar { grid-template-columns: 280px 1fr 280px; }
+      .app[data-variant="c"] .station { justify-content: space-between; padding: 0 28px; }
+      .app[data-variant="c"] .station strong { font: 800 34px/1 "Arial Narrow", Arial; }
+      .app[data-variant="c"] .table-shell { top: 55%; width: min(900px, 67vw); }
+      .app[data-variant="c"] .dock { grid-template-columns: 220px minmax(520px, 2fr) minmax(320px, 1fr); padding-top: 13px; }
+      .app[data-variant="c"] .voice-card { height: 78px; }
+      .app[data-variant="c"] .chip { width: 46px; height: 46px; }
+      .app[data-variant="c"] .stage-rail { left: 28px; right: auto; top: 22px; }
+
+      @keyframes wave { 0%, 100% { transform: scaleY(.55); } 50% { transform: scaleY(1); } }
+      @media (prefers-reduced-motion: reduce) { .wave i { animation: none; } }
+    </style>
+  </head>
+  <body>
+    <main class="app" id="app" data-variant="a">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark">RF</div>
+          <div><div class="brand-name">Royal Flush</div><div class="room-name">周六夜场 · RF-2806</div></div>
+        </div>
+        <div class="station">
+          <div class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+          <div><strong id="station-title">桌内语音已连接</strong><br /><span id="station-sub">阿桥正在说话 · 6 人在线</span></div>
+        </div>
+        <div class="top-actions">
+          <span class="status">延迟 38ms</span>
+          <button class="icon-button" aria-label="关闭麦克风">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3M8 22h8"/></svg>
+          </button>
+          <button class="icon-button" aria-label="打开设置">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.1A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.1A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.1A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.4.3.6.7.6 1.1v.1h1v4h-.1a1.7 1.7 0 0 0-1.5.8Z"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <div class="broadcast"><strong class="broadcast-label">桌内广播</strong><span>小北自行增加了 500 积分，当前局外积分为 1,240</span><time>22:48:16</time></div>
+      <span class="variant-label" id="variant-label">COMPOSITION A · ORBIT TABLE</span>
+
+      <aside class="side-console">
+        <h2 class="console-title">牌局信号台</h2>
+        <div class="console-block"><span>当前手牌</span><strong># 028</strong></div>
+        <div class="console-block"><span>盲注 / 行动时间</span><strong>5 / 10 · 30s</strong></div>
+        <div class="console-block"><span>允许筹码</span><strong>5–100</strong></div>
+        <div class="console-block">
+          <span>桌内记录</span>
+          <div class="event"><time>22:48</time><div>小北自行增加了 500 局外积分</div></div>
+          <div class="event"><time>22:47</time><div>阿桥加注到 70</div></div>
+          <div class="event"><time>22:46</time><div>第 28 手牌开始</div></div>
+        </div>
+      </aside>
+
+      <section class="stage" aria-label="牌桌构图">
+        <div class="stage-rail"><span class="rail-stat">底池 <strong>145</strong></span><span class="rail-stat">手牌 <strong>028</strong></span><span class="rail-stat">盲注 <strong>5 / 10</strong></span></div>
+        <div class="table-shell">
+          <div class="table">
+            <div class="table-center">
+              <div class="pot"><span>当前底池</span><strong>145</strong></div>
+              <div class="community">
+                <div class="card red">A<small>♥</small></div><div class="card">9<small>♣</small></div><div class="card red">7<small>♦</small></div><div class="card">K<small>♠</small></div><div class="card red">3<small>♥</small></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="seat s0 speaking"><div class="seat-name">阿桥</div><div class="seat-points"><span>牌桌分<strong>1,240</strong></span><span>局外积分<strong>3,680</strong></span></div></div>
+          <div class="seat s1"><div class="seat-name">许栗 <b class="dealer">D</b></div><div class="seat-points"><span>牌桌分<strong>835</strong></span><span>局外积分<strong>920</strong></span></div></div>
+          <div class="seat s2"><div class="seat-name">小北</div><div class="seat-points"><span>牌桌分<strong>1,090</strong></span><span>局外积分<strong>1,240</strong></span></div></div>
+          <div class="seat s3"><div class="seat-name">远山</div><div class="seat-points"><span>牌桌分<strong>680</strong></span><span>局外积分<strong>-240</strong></span></div></div>
+          <div class="seat s4"><div class="seat-name">空位</div><div class="seat-points"><span>等待加入<strong>邀请好友</strong></span><span>&nbsp;<strong>—</strong></span></div></div>
+          <div class="seat s5 turn"><div class="seat-name">你</div><div class="seat-points"><span>牌桌分<strong>960</strong></span><span>局外积分<strong>1,860</strong></span></div><div class="hole-cards"><div class="card">A<small>♠</small></div><div class="card red">Q<small>♥</small></div></div></div>
+          <div class="seat s6"><div class="seat-name">林度</div><div class="seat-points"><span>牌桌分<strong>755</strong></span><span>局外积分<strong>610</strong></span></div></div>
+          <div class="seat s7"><div class="seat-name">南序</div><div class="seat-points"><span>牌桌分<strong>1,315</strong></span><span>局外积分<strong>2,100</strong></span></div></div>
+        </div>
+      </section>
+
+      <footer class="dock">
+        <section class="dock-section"><div class="section-title"><span>桌内语音</span><strong>6 / 8</strong></div><div class="voice-card"><div class="avatar">桥</div><div><div class="voice-name">阿桥</div><div class="voice-meta">正在说话 · 信号良好</div></div><div class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div></div></section>
+        <section class="dock-section"><div class="section-title"><span>选择加注筹码</span><strong>可重复组合</strong></div><div class="chip-row"><button class="chip">5</button><button class="chip">10</button><button class="chip">20</button><button class="chip">50</button><button class="chip">100</button><button class="chip ghost">200</button></div><div class="chip-selection"><span>已选择 20 + 50</span><strong>加注 70</strong><span>撤回 · 清空</span></div></section>
+        <section class="dock-section"><div class="section-title"><span>你的行动</span><strong>剩余 18 秒</strong></div><div class="bet-summary"><div><span>需要跟注</span><strong>10</strong></div><div><span>额外加注</span><strong>70</strong></div><div><span>本轮总投入</span><strong>80</strong></div></div><div class="action-row"><button class="action">弃牌</button><button class="action call">跟注 10</button><button class="action raise">确认加注 70</button></div></section>
+      </footer>
+    </main>
+
+    <script>
+      const params = new URLSearchParams(location.search);
+      const variant = ["a", "b", "c"].includes(params.get("variant")) ? params.get("variant") : "a";
+      document.querySelector("#app").dataset.variant = variant;
+      const names = { a: "COMPOSITION A · ORBIT TABLE", b: "COMPOSITION B · CONTROL DESK", c: "COMPOSITION C · SCOREBOARD" };
+      document.querySelector("#variant-label").textContent = names[variant];
+      if (variant === "c") {
+        document.querySelector("#station-title").textContent = "145";
+        document.querySelector("#station-sub").textContent = "当前底池 · 第 28 手";
+      }
+    </script>
+  </body>
+</html>

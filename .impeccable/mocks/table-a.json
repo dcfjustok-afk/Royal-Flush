@@ -1,0 +1,13 @@
+{
+  "title": "A 环形牌桌",
+  "source": "Browser-rendered from .impeccable/mocks/table-comp.html?variant=a at 1440x900",
+  "approved": true,
+  "approvedAt": "2026-08-24",
+  "direction": "深夜电台记分台",
+  "composition": "Large central eight-seat table, persistent broadcast strip, table voice header, and a three-zone bottom action dock.",
+  "doNotLiteralize": [
+    "Synthetic player names and hand values",
+    "Desktop-only absolute seat coordinates",
+    "System font fallback used in the mock"
+  ]
+}
