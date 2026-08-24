@@ -45,6 +45,7 @@ type Server struct {
 	rooms    *room.Manager
 	ops      operations.Store
 	voiceHub *voiceHub
+	realtime *realtimeConnections
 	router   http.Handler
 }
 
@@ -62,7 +63,7 @@ func New(config Config, logger *slog.Logger) *Server {
 	if operationsStore == nil {
 		operationsStore = operations.NewMemoryStore()
 	}
-	server := &Server{config: config, log: logger, auth: authService, scores: scoreService, ops: operationsStore, voiceHub: newVoiceHub()}
+	server := &Server{config: config, log: logger, auth: authService, scores: scoreService, ops: operationsStore, voiceHub: newVoiceHub(), realtime: newRealtimeConnections()}
 	server.rooms = room.NewManagerWithInfrastructure(scoreService, config.RoomStore, config.RoomLease, config.InstanceID)
 	server.router = server.routes()
 	return server

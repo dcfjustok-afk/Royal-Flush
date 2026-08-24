@@ -1,6 +1,10 @@
 import type { RoomConfig, RoomEvent, ScoreAdditionRequest, ScoreLedgerEntry, ScoreResetRequest, TableSnapshot } from "@royal-flush/contracts";
 
 const baseUrl = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
+
+export function isSessionRevokedClose(code: number) {
+  return code === 1008;
+}
 export const apiMode = import.meta.env.VITE_USE_API === "true";
 
 export class ApiError extends Error {

@@ -515,6 +515,68 @@ func TestVoiceWebSocketRelaysSignalsBetweenSeatedUsers(t *testing.T) {
 	}
 }
 
+func TestLogoutImmediatelyRevokesAllRealtimeConnections(t *testing.T) {
+	application := New(Config{Development: false}, nil)
+	t.Cleanup(application.Close)
+	server := httptest.NewServer(application.Handler())
+	defer server.Close()
+	client := server.Client()
+
+	response := request(t, client, http.MethodPost, server.URL+"/api/v1/auth/register", map[string]any{
+		"phone": "13800138001", "password": "table2026", "nickname": "多端玩家",
+	}, nil)
+	if response.StatusCode != http.StatusCreated || len(response.Cookies()) != 1 {
+		t.Fatalf("register status/cookie = %d/%d: %s", response.StatusCode, len(response.Cookies()), readBody(response))
+	}
+	session := response.Cookies()[0]
+	response.Body.Close()
+	roomBody := map[string]any{
+		"name": "会话撤销桌", "maxPlayers": 2, "blindPreset": "5/10", "actionSeconds": 20,
+		"voiceEnabled": true, "chipDenominations": []int{5, 10, 20, 50, 100},
+	}
+	response = request(t, client, http.MethodPost, server.URL+"/api/v1/rooms", roomBody, map[string]string{"Cookie": session.String()})
+	var created struct {
+		ID string `json:"id"`
+	}
+	decodeResponse(t, response, &created)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	baseWSURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/v1/rooms/" + created.ID
+	headers := http.Header{"Cookie": []string{session.String()}}
+	roomConnection, _, err := websocket.Dial(ctx, baseWSURL+"/events", &websocket.DialOptions{HTTPHeader: headers})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer roomConnection.CloseNow()
+	var roomEvent room.Envelope
+	if err := wsjson.Read(ctx, roomConnection, &roomEvent); err != nil || roomEvent.Type != "table.snapshot" {
+		t.Fatalf("room initial event = %#v, err = %v", roomEvent, err)
+	}
+	voiceConnection, _, err := websocket.Dial(ctx, baseWSURL+"/voice-events", &websocket.DialOptions{HTTPHeader: headers})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer voiceConnection.CloseNow()
+	var voiceEvent voiceServerEvent
+	if err := wsjson.Read(ctx, voiceConnection, &voiceEvent); err != nil || voiceEvent.Type != "voice.peers" {
+		t.Fatalf("voice initial event = %#v, err = %v", voiceEvent, err)
+	}
+
+	response = request(t, client, http.MethodPost, server.URL+"/api/v1/auth/logout", nil, map[string]string{"Cookie": session.String()})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("logout status = %d: %s", response.StatusCode, readBody(response))
+	}
+	response.Body.Close()
+	for name, connection := range map[string]*websocket.Conn{"room": roomConnection, "voice": voiceConnection} {
+		var event any
+		err := wsjson.Read(ctx, connection, &event)
+		if status := websocket.CloseStatus(err); status != websocket.StatusPolicyViolation {
+			t.Fatalf("%s connection close status = %d, err = %v", name, status, err)
+		}
+	}
+}
+
 func request(t *testing.T, client *http.Client, method, url string, body any, headers map[string]string) *http.Response {
 	t.Helper()
 	var reader io.Reader

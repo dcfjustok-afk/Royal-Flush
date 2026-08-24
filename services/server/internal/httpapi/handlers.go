@@ -104,9 +104,13 @@ func (s *Server) login(writer http.ResponseWriter, request *http.Request) {
 
 func (s *Server) logout(writer http.ResponseWriter, request *http.Request) {
 	if cookie, err := request.Cookie("rf_session"); err == nil {
+		user, authenticated, _ := s.auth.UserBySession(request.Context(), cookie.Value)
 		if err := s.auth.Logout(request.Context(), cookie.Value); err != nil {
 			writeProblem(writer, http.StatusServiceUnavailable, "session_store_unavailable", "暂时无法退出登录")
 			return
+		}
+		if authenticated {
+			s.realtime.disconnectUser(user.ID)
 		}
 	}
 	http.SetCookie(writer, &http.Cookie{

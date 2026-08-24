@@ -154,6 +154,8 @@ func (s *Server) voiceEvents(writer http.ResponseWriter, request *http.Request) 
 	connection.SetReadLimit(maxVoiceSignalBytes)
 	ctx, cancel := context.WithCancel(request.Context())
 	defer cancel()
+	unregister := s.realtime.add(user.ID, connection)
+	defer unregister()
 	client := &voiceClient{roomID: actor.ID, user: user, send: make(chan voiceServerEvent, 32)}
 	peers := s.voiceHub.join(client)
 	defer s.voiceHub.leave(client)

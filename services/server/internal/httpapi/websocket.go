@@ -30,6 +30,8 @@ func (s *Server) roomEvents(writer http.ResponseWriter, request *http.Request) {
 	connection.SetReadLimit(1 << 20)
 	ctx, cancel := context.WithCancel(request.Context())
 	defer cancel()
+	unregister := s.realtime.add(user.ID, connection)
+	defer unregister()
 	if err := actor.PlayerConnected(ctx, user.ID); err != nil {
 		_ = connection.Close(websocket.StatusPolicyViolation, "player is not seated")
 		return

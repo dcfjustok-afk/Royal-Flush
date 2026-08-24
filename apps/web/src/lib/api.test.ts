@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { api } from "./api";
+import { api, isSessionRevokedClose } from "./api";
 
 describe("player API", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -18,5 +18,11 @@ describe("player API", () => {
     expect(url).toBe("/api/v1/reports");
     expect(init.method).toBe("POST");
     expect(JSON.parse(String(init.body))).toEqual({ roomId: "room-1", subjectUserId: "p2", category: "voice", detail: "持续干扰语音", requestId: "report-request-1" });
+  });
+
+  it("recognizes realtime connections revoked by logout or ban", () => {
+    expect(isSessionRevokedClose(1008)).toBe(true);
+    expect(isSessionRevokedClose(1000)).toBe(false);
+    expect(isSessionRevokedClose(1006)).toBe(false);
   });
 });

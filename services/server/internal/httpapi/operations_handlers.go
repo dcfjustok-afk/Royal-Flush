@@ -104,6 +104,9 @@ func (s *Server) adminSetUserBanned(writer http.ResponseWriter, request *http.Re
 		writeDomainError(writer, err)
 		return
 	}
+	if input.Banned {
+		s.realtime.disconnectUser(userID)
+	}
 	if err := s.auth.SetBanned(request.Context(), userID, input.Banned); err != nil && !errors.Is(err, auth.ErrUserNotFound) {
 		writeProblem(writer, http.StatusServiceUnavailable, "identity_store_unavailable", "用户状态暂时无法同步")
 		return

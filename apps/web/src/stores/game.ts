@@ -2,7 +2,7 @@ import type { ChipDenomination, RoomConfig, ScoreLedgerEntry, TableSnapshot } fr
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { emptyRoomConfig, emptySnapshot } from "@/data/empty";
-import { api, ApiError, apiMode, type AccountUser } from "@/lib/api";
+import { api, ApiError, apiMode, isSessionRevokedClose, type AccountUser } from "@/lib/api";
 import { VoiceController, type VoiceTransport } from "@/lib/voice";
 
 type Message = { id: string; type: string; text: string; at: string };
@@ -201,9 +201,16 @@ export const useGameStore = defineStore("game", () => {
         refreshSnapshot();
       }
     });
-    socket.addEventListener("close", () => {
+    socket.addEventListener("close", (event) => {
       if (eventSocket !== socket) return;
       eventSocket = null;
+      if (isSessionRevokedClose(event.code)) {
+        shouldReconnect = false;
+        connectionState.value = "offline";
+        connectionError.value = "登录状态已失效，请重新登录";
+        clearAccount();
+        return;
+      }
       if (!shouldReconnect) {
         connectionState.value = "offline";
         return;
