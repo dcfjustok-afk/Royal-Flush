@@ -1008,6 +1008,121 @@ func TestRoomActivityDoesNotPostponeTheActionDeadline(t *testing.T) {
 	}
 }
 
+func TestPresencePersistenceFailureRollsBackDisconnectAndReconnect(t *testing.T) {
+	ctx := context.Background()
+	actor, err := NewActor(testConfig(), Identity{ID: "u1", Name: "小北"}, score.NewService(nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer actor.Close()
+	if err := actor.PlayerConnected(ctx, "u1"); err != nil {
+		t.Fatal(err)
+	}
+	persistErr := errors.New("database unavailable")
+	actor.onEvent = func(string, Envelope, PersistentState) error { return persistErr }
+	if err := actor.PlayerDisconnected(ctx, "u1"); !errors.Is(err, persistErr) {
+		t.Fatalf("disconnect error = %v, want persistence failure", err)
+	}
+	snapshot, _ := actor.Snapshot(ctx, "u1")
+	if playerStatus(snapshot, "u1") != "active" {
+		t.Fatalf("failed disconnect changed presence: %#v", snapshot.Players)
+	}
+
+	actor.onEvent = nil
+	if err := actor.PlayerDisconnected(ctx, "u1"); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _ = actor.Snapshot(ctx, "u1")
+	if playerStatus(snapshot, "u1") != "disconnected" {
+		t.Fatalf("successful disconnect was not applied: %#v", snapshot.Players)
+	}
+
+	actor.onEvent = func(string, Envelope, PersistentState) error { return persistErr }
+	if err := actor.PlayerConnected(ctx, "u1"); !errors.Is(err, persistErr) {
+		t.Fatalf("reconnect error = %v, want persistence failure", err)
+	}
+	snapshot, _ = actor.Snapshot(ctx, "u1")
+	if playerStatus(snapshot, "u1") != "disconnected" {
+		t.Fatalf("failed reconnect changed presence: %#v", snapshot.Players)
+	}
+	actor.onEvent = nil
+	if err := actor.PlayerConnected(ctx, "u1"); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _ = actor.Snapshot(ctx, "u1")
+	if playerStatus(snapshot, "u1") != "active" {
+		t.Fatalf("reconnect retry did not restore presence: %#v", snapshot.Players)
+	}
+}
+
+func TestScoreBroadcastPersistenceFailureRestoresMessagesAndIdempotency(t *testing.T) {
+	ctx := context.Background()
+	actor, err := NewActor(testConfig(), Identity{ID: "u1", Name: "小北"}, score.NewService(nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer actor.Close()
+	before, _ := actor.Snapshot(ctx, "u1")
+	persistErr := errors.New("database unavailable")
+	actor.onEvent = func(string, Envelope, PersistentState) error { return persistErr }
+	if err := actor.BroadcastScoreAddition(ctx, "u1", "add-retry", 250, 1250); !errors.Is(err, persistErr) {
+		t.Fatalf("broadcast error = %v, want persistence failure", err)
+	}
+	afterFailure, _ := actor.Snapshot(ctx, "u1")
+	if afterFailure.Version != before.Version || len(afterFailure.Messages) != len(before.Messages) {
+		t.Fatalf("failed broadcast leaked state: before=%#v after=%#v", before.Messages, afterFailure.Messages)
+	}
+	actor.onEvent = nil
+	if err := actor.BroadcastScoreAddition(ctx, "u1", "add-retry", 250, 1250); err != nil {
+		t.Fatalf("broadcast retry failed: %v", err)
+	}
+	afterRetry, _ := actor.Snapshot(ctx, "u1")
+	if afterRetry.Version != before.Version+1 || len(afterRetry.Messages) != len(before.Messages)+1 {
+		t.Fatalf("broadcast retry did not apply once: %#v", afterRetry.Messages)
+	}
+}
+
+func TestScoreAndResetBroadcastsSurviveRestart(t *testing.T) {
+	ctx := context.Background()
+	store := &statefulRoomStore{states: make(map[string]PersistentState)}
+	manager := NewManagerWithStore(score.NewService(nil), store)
+	actor, err := manager.Create(ctx, testConfig(), Identity{ID: "u1", Name: "小北"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := actor.BroadcastScoreAddition(ctx, "u1", "add-before-restart", 250, 1250); err != nil {
+		t.Fatal(err)
+	}
+	epoch := score.Epoch{ID: 2, BaseScore: 1000, Reason: "测试重置", CreatedAt: time.Now().UTC()}
+	if err := actor.BroadcastGlobalReset(ctx, epoch, "reset-before-restart"); err != nil {
+		t.Fatal(err)
+	}
+	manager.Close()
+
+	restoredManager := NewManagerWithStore(score.NewService(nil), store)
+	t.Cleanup(restoredManager.Close)
+	if err := restoredManager.Restore(ctx); err != nil {
+		t.Fatal(err)
+	}
+	restoredActor, ok := restoredManager.Room(actor.ID)
+	if !ok {
+		t.Fatal("room disappeared after restart")
+	}
+	snapshot, err := restoredActor.Snapshot(ctx, "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scoreMessages := 0
+	for _, message := range snapshot.Messages {
+		if message.Type == "score" {
+			scoreMessages++
+		}
+	}
+	if scoreMessages != 2 {
+		t.Fatalf("score/reset messages lost after restart: %#v", snapshot.Messages)
+	}
+}
+
 func TestScoreBroadcastIsPersistent(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()

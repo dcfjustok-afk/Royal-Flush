@@ -239,18 +239,32 @@ func NewActorFromState(state PersistentState, scores AccountScores, onSeatClosed
 
 func (a *Actor) ResumeAfterRestart(ctx context.Context) error {
 	_, err := a.call(ctx, func() (any, error) {
+		checkpoint := a.persistentState()
+		disconnectedUserIDs := make([]string, 0)
 		for _, player := range a.game.Seats {
 			if player == nil || player.Leaving {
 				continue
 			}
 			player.Disconnected = true
-			a.connections[player.UserID] = 0
-			a.disconnectGen[player.UserID]++
+			disconnectedUserIDs = append(disconnectedUserIDs, player.UserID)
+		}
+		if len(disconnectedUserIDs) > 0 {
 			a.version++
-			a.publish("room.player_disconnected", "", map[string]any{
-				"userId": player.UserID, "retainedSeconds": int(a.disconnectWait.Seconds()), "reason": "server_restart",
+			envelope := a.makeEnvelope("room.players_disconnected", "", map[string]any{
+				"userIds": disconnectedUserIDs, "retainedSeconds": int(a.disconnectWait.Seconds()), "reason": "server_restart",
 			})
-			a.scheduleDisconnectTimeout(player.UserID)
+			if a.onEvent != nil {
+				if err := a.onEvent("", envelope, a.persistentState()); err != nil {
+					a.restorePersistentState(checkpoint)
+					return nil, err
+				}
+			}
+			a.publishEnvelope(envelope)
+			for _, userID := range disconnectedUserIDs {
+				a.connections[userID] = 0
+				a.disconnectGen[userID]++
+				a.scheduleDisconnectTimeout(userID)
+			}
 		}
 		if a.game.InHand() && a.game.Actor >= 0 {
 			a.scheduleActionTimeoutAt(a.deadline)
@@ -490,15 +504,27 @@ func (a *Actor) PlayerConnected(ctx context.Context, userID string) error {
 		if seat < 0 {
 			return nil, ErrPlayerNotSeated
 		}
-		a.connections[userID]++
-		a.disconnectGen[userID]++
+		previousConnections := a.connections[userID]
+		previousGeneration := a.disconnectGen[userID]
+		a.connections[userID] = previousConnections + 1
+		a.disconnectGen[userID] = previousGeneration + 1
 		player := a.game.Seats[seat]
 		if player.Disconnected {
+			checkpoint := a.persistentState()
 			if err := a.game.SetDisconnected(seat, false); err != nil {
 				return nil, err
 			}
 			a.version++
-			a.publish("room.player_reconnected", "", map[string]any{"userId": userID})
+			envelope := a.makeEnvelope("room.player_reconnected", "", map[string]any{"userId": userID})
+			if a.onEvent != nil {
+				if err := a.onEvent(userID, envelope, a.persistentState()); err != nil {
+					a.restorePersistentState(checkpoint)
+					a.connections[userID] = previousConnections
+					a.disconnectGen[userID] = previousGeneration
+					return nil, err
+				}
+			}
+			a.publishEnvelope(envelope)
 		}
 		return nil, nil
 	})
@@ -511,18 +537,30 @@ func (a *Actor) PlayerDisconnected(ctx context.Context, userID string) error {
 		if seat < 0 {
 			return nil, ErrPlayerNotSeated
 		}
-		if a.connections[userID] > 0 {
-			a.connections[userID]--
+		previousConnections := a.connections[userID]
+		previousGeneration := a.disconnectGen[userID]
+		if previousConnections > 0 {
+			a.connections[userID] = previousConnections - 1
 		}
 		if a.connections[userID] > 0 || a.game.Seats[seat].Disconnected {
 			return nil, nil
 		}
+		checkpoint := a.persistentState()
 		if err := a.game.SetDisconnected(seat, true); err != nil {
 			return nil, err
 		}
 		a.version++
-		a.publish("room.player_disconnected", "", map[string]any{"userId": userID, "retainedSeconds": int(a.disconnectWait.Seconds())})
-		a.disconnectGen[userID]++
+		a.disconnectGen[userID] = previousGeneration + 1
+		envelope := a.makeEnvelope("room.player_disconnected", "", map[string]any{"userId": userID, "retainedSeconds": int(a.disconnectWait.Seconds())})
+		if a.onEvent != nil {
+			if err := a.onEvent(userID, envelope, a.persistentState()); err != nil {
+				a.restorePersistentState(checkpoint)
+				a.connections[userID] = previousConnections
+				a.disconnectGen[userID] = previousGeneration
+				return nil, err
+			}
+		}
+		a.publishEnvelope(envelope)
 		a.scheduleDisconnectTimeout(userID)
 		return nil, nil
 	})
@@ -569,11 +607,18 @@ func (a *Actor) BroadcastScoreAddition(ctx context.Context, userID, requestID st
 		if identity.ID == "" {
 			return nil, ErrPlayerNotSeated
 		}
+		checkpoint := a.persistentState()
 		text := fmt.Sprintf("%s 自行增加了 %d 积分，当前局外积分为 %d", identity.Name, amount, balance)
 		message := a.appendMessage("score", text)
 		a.version++
 		envelope := a.makeEnvelope("score.self_added", requestID, map[string]any{"userId": userID, "amount": amount, "balance": balance, "message": message})
 		a.processed[key] = envelope
+		if a.onEvent != nil {
+			if err := a.onEvent(userID, envelope, a.persistentState()); err != nil {
+				a.restorePersistentState(checkpoint)
+				return nil, err
+			}
+		}
 		a.publishEnvelope(envelope)
 		return nil, nil
 	})
@@ -582,9 +627,22 @@ func (a *Actor) BroadcastScoreAddition(ctx context.Context, userID, requestID st
 
 func (a *Actor) BroadcastGlobalReset(ctx context.Context, epoch score.Epoch, requestID string) error {
 	_, err := a.call(ctx, func() (any, error) {
+		key := processedKey("global-reset", requestID)
+		if _, ok := a.processed[key]; ok {
+			return nil, nil
+		}
+		checkpoint := a.persistentState()
 		message := a.appendMessage("score", "平台管理员已将所有账号的局外积分重置为 1,000，本局继续，结束后照常结算净输赢。")
 		a.version++
-		a.publish("score.global_reset", requestID, map[string]any{"epoch": epoch, "message": message})
+		envelope := a.makeEnvelope("score.global_reset", requestID, map[string]any{"epoch": epoch, "message": message})
+		a.processed[key] = envelope
+		if a.onEvent != nil {
+			if err := a.onEvent("", envelope, a.persistentState()); err != nil {
+				a.restorePersistentState(checkpoint)
+				return nil, err
+			}
+		}
+		a.publishEnvelope(envelope)
 		return nil, nil
 	})
 	return err
@@ -1097,14 +1155,6 @@ func (a *Actor) appendMessage(kind, text string) SystemMessage {
 
 func (a *Actor) makeEnvelope(kind, requestID string, payload any) Envelope {
 	return Envelope{Type: kind, RequestID: requestID, RoomID: a.ID, Version: a.version, SentAt: time.Now().UTC(), Payload: payload}
-}
-
-func (a *Actor) publish(kind, requestID string, payload any) {
-	envelope := a.makeEnvelope(kind, requestID, payload)
-	if a.onEvent != nil {
-		_ = a.onEvent("", envelope, a.persistentState())
-	}
-	a.publishEnvelope(envelope)
 }
 
 func (a *Actor) PersistentState(ctx context.Context) (PersistentState, error) {
