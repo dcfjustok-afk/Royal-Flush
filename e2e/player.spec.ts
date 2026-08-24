@@ -205,6 +205,67 @@ test("刷新当前等候室会保留权威准备状态", async ({ page }, testIn
   await expect(page.locator(".form-message.error")).toHaveCount(0);
 });
 
+test("跨房失败会保留原房间且重试成功后进入目标房间", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1440", "代表性桌面项目覆盖跨房失败与重试");
+  const oldRoom = structuredClone(playerSnapshot);
+  oldRoom.roomId = "room-old";
+  oldRoom.roomCode = "RF-OLD1";
+  oldRoom.roomName = "原等候室";
+  oldRoom.street = "waiting";
+  oldRoom.handNumber = 0;
+  oldRoom.players.forEach((player) => (player.isCurrentActor = false));
+  const target = structuredClone(oldRoom);
+  target.roomId = "room-target";
+  target.roomCode = "RF-TARG";
+  target.roomName = "目标等候室";
+  if (!target.config) throw new Error("player fixture is missing room config");
+  target.config.name = "目标等候室";
+  target.players = [
+    target.players.find((player) => player.id === "p1")!,
+    target.players.find((player) => player.id === "me")!,
+  ].map((player, seat) => ({ ...player, seat, isLocal: player.id === "me", isReady: false }));
+  let joinAttempts = 0;
+  await page.route("**/api/v1/me", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      user: { id: "me", phone: "13800138000", nickname: "你", permissions: {}, banned: false, createdAt: "2026-08-24T12:00:00Z" },
+      balance: 1860,
+      activeRoomId: "room-old",
+    }),
+  }));
+  await page.route("**/api/v1/rooms/room-old/snapshot", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(oldRoom) }));
+  await page.route("**/api/v1/rooms/RF-TARG/public", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      id: "room-target", code: "RF-TARG", name: "目标等候室", ownerId: "p1", ownerName: "阿桥",
+      onlinePlayers: 1, maxPlayers: 8, occupiedSeats: [0], config: target.config,
+    }),
+  }));
+  await page.route("**/api/v1/rooms/room-target/join", (route) => {
+    joinAttempts++;
+    if (joinAttempts === 1) {
+      return route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({ code: "room_switch_in_hand", message: "当前手牌进行中，结束后才能切换房间" }),
+      });
+    }
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(target) });
+  });
+  await page.route("**/api/v1/rooms/room-target/snapshot", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(target) }));
+
+  await page.goto("/invite/RF-TARG");
+  await page.getByRole("button", { name: /进入等候室/ }).click();
+  await expect(page).toHaveURL(/\/invite\/RF-TARG$/);
+  await expect(page.getByRole("alert")).toContainText("当前手牌进行中");
+  await page.getByRole("button", { name: /进入等候室/ }).click();
+  await expect(page).toHaveURL(/\/rooms\/room-target\/waiting$/);
+  await expect(page.getByRole("heading", { name: "目标等候室" })).toBeVisible();
+  expect(joinAttempts).toBe(2);
+});
+
 test("牌桌在目标视口内保持完整且筹码不会改变布局", async ({ page }) => {
   await page.goto("/rooms/room-saturday/table");
   await expect(page.locator(".table-app")).toBeVisible();
