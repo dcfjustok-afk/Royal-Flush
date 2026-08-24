@@ -308,12 +308,77 @@ func TestManagerRejectsUnavailableLeaseAndClosesOnOwnershipLoss(t *testing.T) {
 	t.Fatal("room remained active after lease ownership was lost")
 }
 
+func TestManagerPersistsOwnerSeatJoinedSeatsAndCommands(t *testing.T) {
+	ctx := context.Background()
+	store := &recordingRoomStore{}
+	manager := NewManagerWithStore(score.NewService(nil), store)
+	actor, err := manager.Create(ctx, testConfig(), Identity{ID: "owner", Name: "房主"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(manager.Close)
+	if store.createdOwner.UserID != "owner" || store.createdOwner.Seat != 0 || store.createdOwner.AllocatedPoints != InitialTablePoints {
+		t.Fatalf("owner seat was not persisted with the room: %#v", store.createdOwner)
+	}
+	if _, err := manager.Join(ctx, actor.ID, Identity{ID: "u2", Name: "玩家二"}, 2); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.openedSeats) != 1 || store.openedSeats[0].UserID != "u2" {
+		t.Fatalf("joined seat was not persisted: %#v", store.openedSeats)
+	}
+	if _, _, err := actor.Handle(ctx, "u2", ClientCommand{Type: "room.quick_message", RequestID: "persisted-command", Payload: json.RawMessage(`{"message":"好牌"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.events) == 0 || store.events[len(store.events)-1].RequestID != "persisted-command" {
+		t.Fatalf("command event was not persisted: %#v", store.events)
+	}
+}
+
 type recordingLease struct {
 	mu       sync.Mutex
 	acquire  bool
 	renews   int
 	releases int
 	renewErr error
+}
+
+type recordingRoomStore struct {
+	createdOwner roomSeatCopy
+	openedSeats  []roomSeatCopy
+	events       []Envelope
+}
+
+type roomSeatCopy = SeatRecord
+
+func (s *recordingRoomStore) CreateRoom(_ context.Context, _ Record, owner SeatRecord) error {
+	s.createdOwner = owner
+	return nil
+}
+
+func (s *recordingRoomStore) OpenSeat(_ context.Context, seat SeatRecord, _ bool) error {
+	s.openedSeats = append(s.openedSeats, seat)
+	return nil
+}
+
+func (s *recordingRoomStore) AddSeatAllocation(context.Context, string, int64) error {
+	return nil
+}
+
+func (s *recordingRoomStore) UpdateRoomCode(context.Context, string, string, string) error {
+	return nil
+}
+
+func (s *recordingRoomStore) UpdateRoomOwner(context.Context, string, string) error {
+	return nil
+}
+
+func (s *recordingRoomStore) EndRoom(context.Context, string, time.Time) error {
+	return nil
+}
+
+func (s *recordingRoomStore) AppendRoomEvent(_ context.Context, _ string, event Envelope) error {
+	s.events = append(s.events, event)
+	return nil
 }
 
 func (l *recordingLease) Acquire(context.Context, string, string, time.Duration) (bool, error) {

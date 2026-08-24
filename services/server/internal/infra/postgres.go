@@ -41,6 +41,8 @@ func (p *Postgres) Pool() *pgxpool.Pool {
 }
 
 func (p *Postgres) AppendRoomEvent(ctx context.Context, actorUserID string, event room.Envelope) error {
+	ctx, cancel := context.WithTimeout(ctx, postgresOperationTimeout)
+	defer cancel()
 	payload, err := json.Marshal(event.Payload)
 	if err != nil {
 		return err
@@ -53,7 +55,7 @@ func (p *Postgres) AppendRoomEvent(ctx context.Context, actorUserID string, even
 		return err
 	}
 	if commandTag.RowsAffected() == 0 {
-		return errors.New("room event version or request already exists")
+		return errors.New("room event request already exists")
 	}
 	return nil
 }

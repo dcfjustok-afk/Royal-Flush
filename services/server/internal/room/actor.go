@@ -155,6 +155,9 @@ type Actor struct {
 	onCodeChanged  func(oldCode, newCode string) error
 	onOwnerChanged func(ownerID string) error
 	onRoomEnded    func() error
+	onSeatOpened   func(seat SeatRecord, claimOwnership bool) error
+	onSeatRefilled func(seatSessionID string, amount int64) error
+	onEvent        func(actorUserID string, event Envelope) error
 }
 
 func NewActor(config Config, owner Identity, scores AccountScores, onSeatClosed func(string)) (*Actor, error) {
@@ -213,14 +216,26 @@ func (a *Actor) Join(ctx context.Context, identity Identity, seat int) (TableSna
 		if err != nil {
 			return nil, err
 		}
-		if _, err := a.game.Sit(identity.ID, identity.Name, seat, sessionID); err != nil {
+		player, err := a.game.Sit(identity.ID, identity.Name, seat, sessionID)
+		if err != nil {
 			return nil, err
+		}
+		claimOwnership := a.OwnerID == ""
+		if a.onSeatOpened != nil {
+			record := SeatRecord{
+				ID: player.SeatSessionID, RoomID: a.ID, UserID: player.UserID, Seat: player.Seat,
+				AllocatedPoints: player.Allocated, JoinedAt: time.Now().UTC(),
+			}
+			if err := a.onSeatOpened(record, claimOwnership); err != nil {
+				_, _ = a.game.RemoveSeat(seat)
+				return nil, err
+			}
 		}
 		a.identities[identity.ID] = identity
 		a.nextJoin++
 		a.joinOrder[identity.ID] = a.nextJoin
-		if a.OwnerID == "" {
-			if a.onOwnerChanged != nil {
+		if claimOwnership {
+			if a.onOwnerChanged != nil && a.onSeatOpened == nil {
 				if err := a.onOwnerChanged(identity.ID); err != nil {
 					_, _ = a.game.RemoveSeat(seat)
 					delete(a.identities, identity.ID)
@@ -290,6 +305,11 @@ func (a *Actor) Handle(ctx context.Context, userID string, command ClientCommand
 		}
 		a.version++
 		envelope := a.makeEnvelope(eventType, command.RequestID, payload)
+		if a.onEvent != nil {
+			if err := a.onEvent(userID, envelope); err != nil {
+				return nil, err
+			}
+		}
 		a.processed[key] = envelope
 		a.publishEnvelope(envelope)
 		if a.game.InHand() && a.game.Actor >= 0 {
@@ -473,8 +493,16 @@ func (a *Actor) applyCommand(userID string, seat int, command ClientCommand) (an
 		}
 		return map[string]any{"action": "all_in", "amount": amount}, "game.action_applied", nil
 	case "room.refill":
+		player := a.game.Seats[seat]
+		beforeStack, beforeAllocated, beforeAway, beforeVersion := player.Stack, player.Allocated, player.Away, a.game.Version
 		if err := a.game.Refill(seat); err != nil {
 			return nil, "", err
+		}
+		if a.onSeatRefilled != nil {
+			if err := a.onSeatRefilled(player.SeatSessionID, InitialTablePoints); err != nil {
+				player.Stack, player.Allocated, player.Away, a.game.Version = beforeStack, beforeAllocated, beforeAway, beforeVersion
+				return nil, "", err
+			}
 		}
 		return map[string]any{"tablePoints": player.Stack, "allocatedTablePoints": player.Allocated}, "room.table_points_refilled", nil
 	case "room.leave":
@@ -815,7 +843,11 @@ func (a *Actor) makeEnvelope(kind, requestID string, payload any) Envelope {
 }
 
 func (a *Actor) publish(kind, requestID string, payload any) {
-	a.publishEnvelope(a.makeEnvelope(kind, requestID, payload))
+	envelope := a.makeEnvelope(kind, requestID, payload)
+	if a.onEvent != nil {
+		_ = a.onEvent("", envelope)
+	}
+	a.publishEnvelope(envelope)
 }
 
 func (a *Actor) publishEnvelope(envelope Envelope) {

@@ -69,9 +69,13 @@ func (m *Manager) Create(ctx context.Context, config Config, owner Identity) (*A
 		}
 	}
 	if m.store != nil {
+		ownerPlayer := actor.game.Seats[0]
 		err := m.store.CreateRoom(ctx, Record{
 			ID: actor.ID, Code: actor.Code, OwnerID: actor.OwnerID, Config: config,
 			Version: actor.version, CreatedAt: actor.CreatedAt,
+		}, SeatRecord{
+			ID: ownerPlayer.SeatSessionID, RoomID: actor.ID, UserID: ownerPlayer.UserID, Seat: ownerPlayer.Seat,
+			AllocatedPoints: ownerPlayer.Allocated, JoinedAt: actor.CreatedAt,
 		})
 		if err != nil {
 			m.releaseLease(actor.ID)
@@ -91,6 +95,24 @@ func (m *Manager) Create(ctx context.Context, config Config, owner Identity) (*A
 			return nil
 		}
 		return m.store.EndRoom(context.Background(), actor.ID, time.Now().UTC())
+	}
+	actor.onSeatOpened = func(seat SeatRecord, claimOwnership bool) error {
+		if m.store == nil {
+			return nil
+		}
+		return m.store.OpenSeat(context.Background(), seat, claimOwnership)
+	}
+	actor.onSeatRefilled = func(seatSessionID string, amount int64) error {
+		if m.store == nil {
+			return nil
+		}
+		return m.store.AddSeatAllocation(context.Background(), seatSessionID, amount)
+	}
+	actor.onEvent = func(actorUserID string, event Envelope) error {
+		if m.store == nil {
+			return nil
+		}
+		return m.store.AppendRoomEvent(context.Background(), actorUserID, event)
 	}
 	m.rooms[actor.ID] = actor
 	m.byCode[actor.Code] = actor

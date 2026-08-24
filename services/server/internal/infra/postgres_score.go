@@ -97,6 +97,20 @@ func (p *Postgres) ApplySettlement(userID, roomID, seatSessionID string, net int
 	if err != nil {
 		return score.Result{}, err
 	}
+	var remaining int64
+	err = tx.QueryRow(ctx, `
+		UPDATE seat_sessions
+		SET remaining_points = allocated_points + $1, left_at = $2
+		WHERE id = $3 AND room_id = $4 AND user_id = $5 AND left_at IS NULL
+		RETURNING remaining_points`, net, now, seatSessionID, roomID, userID).Scan(&remaining)
+	if err != nil {
+		return score.Result{}, fmt.Errorf("close seat session: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO seat_settlements (seat_session_id, ledger_id, net_points, created_at)
+		VALUES ($1, $2, $3, $4)`, seatSessionID, result.Entry.ID, net, now); err != nil {
+		return score.Result{}, fmt.Errorf("record seat settlement: %w", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return score.Result{}, fmt.Errorf("commit score settlement: %w", err)
 	}
