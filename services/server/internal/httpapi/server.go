@@ -248,6 +248,14 @@ func writeProblem(writer http.ResponseWriter, status int, code, message string) 
 }
 
 func writeDomainError(writer http.ResponseWriter, err error) {
+	status, code, message := domainErrorProblem(err)
+	if status == http.StatusInternalServerError {
+		slog.Error("unhandled API domain error", "error", err)
+	}
+	writeProblem(writer, status, code, message)
+}
+
+func domainErrorProblem(err error) (int, string, string) {
 	status := http.StatusInternalServerError
 	code := "internal_error"
 	message := "服务暂时无法完成该操作，请稍后重试"
@@ -305,8 +313,5 @@ func writeDomainError(writer http.ResponseWriter, err error) {
 	case errors.Is(err, room.ErrRoomLeaseUnavailable), errors.Is(err, room.ErrLeaseNotOwned):
 		status, code, message = http.StatusServiceUnavailable, "room_temporarily_unavailable", "房间正在恢复，请稍后重试"
 	}
-	if status == http.StatusInternalServerError {
-		slog.Error("unhandled API domain error", "error", err)
-	}
-	writeProblem(writer, status, code, message)
+	return status, code, message
 }

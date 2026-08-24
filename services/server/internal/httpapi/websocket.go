@@ -81,7 +81,11 @@ func (s *Server) roomEvents(writer http.ResponseWriter, request *http.Request) {
 			}
 			event, duplicate, err := actor.Handle(ctx, user.ID, command)
 			if err != nil {
-				problem := room.Envelope{Type: "error", RequestID: command.RequestID, RoomID: actor.ID, Version: snapshot.Version, Payload: map[string]any{"message": err.Error()}}
+				status, code, message := domainErrorProblem(err)
+				if status == http.StatusInternalServerError {
+					s.log.Error("unhandled WebSocket domain error", "error", err)
+				}
+				problem := room.Envelope{Type: "error", RequestID: command.RequestID, RoomID: actor.ID, Version: snapshot.Version, Payload: map[string]any{"code": code, "message": message}}
 				if wsjson.Write(ctx, connection, problem) != nil {
 					return
 				}
