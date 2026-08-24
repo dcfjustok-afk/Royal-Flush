@@ -80,13 +80,34 @@ func (m *Manager) Create(ctx context.Context, config Config, owner Identity) (*A
 	}
 	if m.store != nil {
 		ownerPlayer := actor.game.Seats[0]
-		err := m.store.CreateRoom(ctx, Record{
+		record := Record{
 			ID: actor.ID, Code: actor.Code, OwnerID: actor.OwnerID, Config: config,
 			Version: actor.version, CreatedAt: actor.CreatedAt,
-		}, SeatRecord{
+		}
+		ownerSeat := SeatRecord{
 			ID: ownerPlayer.SeatSessionID, RoomID: actor.ID, UserID: ownerPlayer.UserID, Seat: ownerPlayer.Seat,
 			AllocatedPoints: ownerPlayer.Allocated, JoinedAt: actor.CreatedAt,
-		})
+		}
+		if atomicStore, ok := m.store.(AtomicCreateStateStore); ok {
+			state, stateErr := actor.PersistentState(ctx)
+			if stateErr != nil {
+				err = stateErr
+			} else {
+				err = atomicStore.CreateRoomAndSaveState(ctx, record, ownerSeat, state)
+			}
+		} else {
+			err = m.store.CreateRoom(ctx, record, ownerSeat)
+			if err == nil {
+				if stateStore, ok := m.store.(StateStore); ok {
+					state, stateErr := actor.PersistentState(ctx)
+					if stateErr != nil {
+						err = stateErr
+					} else {
+						err = stateStore.SaveRoomState(ctx, state)
+					}
+				}
+			}
+		}
 		if err != nil {
 			m.releaseLease(actor.ID)
 			actor.Close()
@@ -94,18 +115,6 @@ func (m *Manager) Create(ctx context.Context, config Config, owner Identity) (*A
 		}
 	}
 	m.configureActor(actor)
-	if stateStore, ok := m.store.(StateStore); ok {
-		state, err := actor.PersistentState(ctx)
-		if err == nil {
-			err = stateStore.SaveRoomState(ctx, state)
-		}
-		if err != nil {
-			_ = m.store.EndRoom(context.Background(), actor.ID, time.Now().UTC())
-			m.releaseLease(actor.ID)
-			actor.Close()
-			return nil, err
-		}
-	}
 	m.rooms[actor.ID] = actor
 	m.byCode[actor.Code] = actor
 	m.activeSeat[owner.ID] = actor.ID

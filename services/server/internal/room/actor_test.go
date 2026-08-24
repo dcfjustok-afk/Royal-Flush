@@ -454,6 +454,23 @@ func TestManagerPersistsOwnerSeatJoinedSeatsAndCommands(t *testing.T) {
 	}
 }
 
+func TestAtomicRoomCreationFailureLeavesNoOwnerSeatOrState(t *testing.T) {
+	ctx := context.Background()
+	persistErr := errors.New("database unavailable")
+	store := &statefulRoomStore{states: make(map[string]PersistentState), saveErr: persistErr}
+	manager := NewManagerWithStore(score.NewService(nil), store)
+	t.Cleanup(manager.Close)
+	if _, err := manager.Create(ctx, testConfig(), Identity{ID: "owner", Name: "房主"}); !errors.Is(err, persistErr) {
+		t.Fatalf("create error = %v, want persistence failure", err)
+	}
+	if store.createdOwner.ID != "" || len(store.states) != 0 {
+		t.Fatalf("failed creation left database artifacts: owner=%#v states=%#v", store.createdOwner, store.states)
+	}
+	if manager.ActiveRoom("owner") != "" {
+		t.Fatal("failed creation retained active membership")
+	}
+}
+
 func TestManagerRestoresAnActiveHandAndPrivateCards(t *testing.T) {
 	ctx := context.Background()
 	store := &statefulRoomStore{states: make(map[string]PersistentState)}
@@ -608,6 +625,16 @@ func (s *statefulRoomStore) SaveRoomState(_ context.Context, state PersistentSta
 	}
 	s.states[state.Room.ID] = state
 	return nil
+}
+
+func (s *statefulRoomStore) CreateRoomAndSaveState(ctx context.Context, record Record, owner SeatRecord, state PersistentState) error {
+	if s.saveErr != nil {
+		return s.saveErr
+	}
+	if err := s.CreateRoom(ctx, record, owner); err != nil {
+		return err
+	}
+	return s.SaveRoomState(ctx, state)
 }
 
 func (s *statefulRoomStore) LoadRoomStates(context.Context) ([]PersistentState, error) {

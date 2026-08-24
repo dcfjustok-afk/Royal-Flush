@@ -41,6 +41,43 @@ func (p *Postgres) CreateRoom(ctx context.Context, record room.Record, ownerSeat
 	return nil
 }
 
+func (p *Postgres) CreateRoomAndSaveState(ctx context.Context, record room.Record, ownerSeat room.SeatRecord, state room.PersistentState) error {
+	ctx, cancel := context.WithTimeout(ctx, postgresOperationTimeout)
+	defer cancel()
+	config, err := json.Marshal(record.Config)
+	if err != nil {
+		return fmt.Errorf("encode room config: %w", err)
+	}
+	rawState, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("encode room state: %w", err)
+	}
+	tx, err := p.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin room creation: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	if err := ensureUserTx(ctx, tx, record.OwnerID, record.CreatedAt); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO rooms (id, code, owner_id, config, status, version, created_at)
+		VALUES ($1, $2, $3, $4, 'waiting', $5, $6)`,
+		record.ID, record.Code, record.OwnerID, config, record.Version, record.CreatedAt); err != nil {
+		return fmt.Errorf("create room: %w", err)
+	}
+	if err := insertSeat(ctx, tx, ownerSeat); err != nil {
+		return err
+	}
+	if err := saveRoomStateTx(ctx, tx, state, rawState); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit room creation: %w", err)
+	}
+	return nil
+}
+
 func (p *Postgres) OpenSeat(ctx context.Context, seat room.SeatRecord, claimOwnership bool) error {
 	ctx, cancel := context.WithTimeout(ctx, postgresOperationTimeout)
 	defer cancel()
