@@ -2,6 +2,7 @@ package room
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -337,7 +338,7 @@ func (a *Actor) Handle(ctx context.Context, userID string, command ClientCommand
 		if command.RequestID == "" {
 			return nil, score.ErrRequestID
 		}
-		key := userID + "\x00" + command.RequestID
+		key := processedKey("command", userID, command.RequestID)
 		if existing, ok := a.processed[key]; ok {
 			return commandResult{Envelope: existing, Duplicate: true}, nil
 		}
@@ -477,7 +478,7 @@ func (a *Actor) UpdateIdentity(ctx context.Context, identity Identity) error {
 
 func (a *Actor) BroadcastScoreAddition(ctx context.Context, userID, requestID string, amount, balance int64) error {
 	_, err := a.call(ctx, func() (any, error) {
-		key := "score-addition\x00" + userID + "\x00" + requestID
+		key := processedKey("score-addition", userID, requestID)
 		if _, ok := a.processed[key]; ok {
 			return nil, nil
 		}
@@ -694,6 +695,14 @@ func (a *Actor) applyCommand(userID string, seat int, command ClientCommand) (an
 	default:
 		return nil, "", fmt.Errorf("unsupported command %q", command.Type)
 	}
+}
+
+func processedKey(parts ...string) string {
+	encoded := make([]string, len(parts))
+	for index, part := range parts {
+		encoded[index] = base64.RawURLEncoding.EncodeToString([]byte(part))
+	}
+	return strings.Join(encoded, ".")
 }
 
 func (a *Actor) snapshot(userID string) TableSnapshot {

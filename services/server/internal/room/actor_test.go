@@ -572,6 +572,42 @@ func TestRaiseValidationVersionAndIdempotency(t *testing.T) {
 	}
 }
 
+func TestProcessedCommandKeysRemainValidPostgresJSON(t *testing.T) {
+	ctx := context.Background()
+	actor, err := NewActor(testConfig(), Identity{ID: "user-one", Name: "房主"}, score.NewService(nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer actor.Close()
+	payload := json.RawMessage(`{"ready":true}`)
+	command := ClientCommand{Type: "room.ready", RequestID: "ready-request", Payload: payload}
+	event, duplicate, err := actor.Handle(ctx, "user-one", command)
+	if err != nil || duplicate {
+		t.Fatalf("first command failed: event=%#v duplicate=%v err=%v", event, duplicate, err)
+	}
+	retry, duplicate, err := actor.Handle(ctx, "user-one", command)
+	if err != nil || !duplicate || retry.Version != event.Version {
+		t.Fatalf("encoded idempotency key lost duplicate detection: event=%#v duplicate=%v err=%v", retry, duplicate, err)
+	}
+	if err := actor.BroadcastScoreAddition(ctx, "user-one", "score-request", 10, 1010); err != nil {
+		t.Fatal(err)
+	}
+	state, err := actor.PersistentState(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `\u0000`) {
+		t.Fatalf("persisted state still contains a PostgreSQL-incompatible Unicode escape: %s", raw)
+	}
+	if strings.ContainsRune(processedKey("command", "user\x00one", "request\x00one"), '\x00') {
+		t.Fatal("encoded idempotency key retained a control character")
+	}
+}
+
 func TestRoomActivityDoesNotPostponeTheActionDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
