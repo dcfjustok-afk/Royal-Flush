@@ -28,4 +28,21 @@ describe("admin score API", () => {
       requestId: expect.any(String),
     });
   });
+
+  it("sends idempotent moderation and report resolution commands", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ user: { id: "u1", banned: true }, duplicate: false }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ report: { id: "r1", status: "resolved" }, duplicate: false }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await adminApi.setUserBanned("u1", true, "违反房间秩序");
+    await adminApi.resolveReport("r1", "resolved", "已完成核查");
+
+    const [banURL, banInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(banURL).toBe("/api/v1/admin/users/u1/ban-actions");
+    expect(JSON.parse(String(banInit.body))).toMatchObject({ banned: true, reason: "违反房间秩序", requestId: expect.any(String) });
+    const [reportURL, reportInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(reportURL).toBe("/api/v1/admin/reports/r1/resolution");
+    expect(JSON.parse(String(reportInit.body))).toMatchObject({ status: "resolved", reason: "已完成核查", requestId: expect.any(String) });
+  });
 });

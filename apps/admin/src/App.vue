@@ -1,53 +1,126 @@
 <script setup lang="ts">
-import { Activity, AlertTriangle, CheckCircle2, ChevronDown, CircleUserRound, Clock3, DoorOpen, FileClock, Gauge, Radio, RefreshCw, RotateCcw, Search, ShieldCheck, Users, X } from "@lucide/vue";
-import { computed, onMounted, ref } from "vue";
-import { adminApi, apiMode } from "./api";
+import {
+  Activity, AlertTriangle, Ban, CheckCircle2, ChevronDown, CircleUserRound, Clock3,
+  DoorOpen, FileClock, Gauge, Inbox, LoaderCircle, Radio, RefreshCw, RotateCcw,
+  Search, ShieldCheck, Unlock, Users, WifiOff, X, XCircle,
+} from "@lucide/vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import {
+  adminApi, apiMode,
+  type AdminAudit, type AdminRoom, type AdminRoomSnapshot, type OperationsUser, type Report,
+} from "./api";
 
-const activeSection = ref<"overview" | "users" | "rooms" | "reports" | "audit">("overview");
+type Section = "overview" | "users" | "rooms" | "reports" | "audit";
+
+const now = new Date();
+const activeSection = ref<Section>("overview");
 const search = ref("");
+const loading = ref(false);
+const loadErrors = ref<string[]>([]);
+const epoch = ref(4);
+const rooms = ref<AdminRoom[]>([
+  { id: "room-demo-2806", code: "RF-2806", name: "周六夜场", ownerId: "u1", ownerName: "岱奇", players: 6, onlinePlayers: 6, maxPlayers: 8, blindPreset: "5/10", handNumber: 28, voiceEnabled: true, status: "playing", version: 94, createdAt: now.toISOString() },
+  { id: "room-demo-9132", code: "RF-9132", name: "慢速夜场", ownerId: "u2", ownerName: "阿桥", players: 4, onlinePlayers: 3, maxPlayers: 6, blindPreset: "2/5", handNumber: 11, voiceEnabled: true, status: "playing", version: 47, createdAt: now.toISOString() },
+  { id: "room-demo-0475", code: "RF-0475", name: "练习桌", ownerId: "u3", ownerName: "小北", players: 2, onlinePlayers: 2, maxPlayers: 8, blindPreset: "10/20", handNumber: 0, voiceEnabled: false, status: "waiting", version: 8, createdAt: now.toISOString() },
+]);
+const users = ref<OperationsUser[]>([
+  { id: "u1", nickname: "岱奇", phone: "13800132806", balance: 1860, activeRoomId: "room-demo-2806", banned: false, createdAt: now.toISOString(), updatedAt: now.toISOString() },
+  { id: "u2", nickname: "阿桥", phone: "13900131408", balance: 3680, activeRoomId: "room-demo-2806", banned: false, createdAt: now.toISOString(), updatedAt: now.toISOString() },
+  { id: "u3", nickname: "远山", phone: "18600139021", balance: -240, activeRoomId: "room-demo-9132", banned: false, createdAt: now.toISOString(), updatedAt: now.toISOString() },
+  { id: "u4", nickname: "林度", phone: "13700136110", balance: 610, banned: true, createdAt: now.toISOString(), updatedAt: now.toISOString() },
+]);
+const reports = ref<Report[]>([
+  { id: "report-demo-1", reporterId: "u3", roomId: "room-demo-9132", subjectUserId: "u2", category: "conduct", detail: "连续多轮在最后一秒行动，影响牌局节奏。", status: "open", createdAt: now.toISOString() },
+  { id: "report-demo-2", reporterId: "u1", roomId: "room-demo-2806", category: "voice", detail: "语音中持续出现杂音。", status: "open", createdAt: now.toISOString() },
+]);
+const audits = ref<AdminAudit[]>([
+  { id: "audit-demo-1", administratorId: "ops.li", action: "score.reset_all", targetType: "score_epoch", targetId: "4", reason: "季度演练", requestId: "demo-1", metadata: {}, createdAt: "2026-08-20T10:34:00+08:00" },
+  { id: "audit-demo-2", administratorId: "ops.chen", action: "user.unban", targetType: "user", targetId: "u4", reason: "复核完成", requestId: "demo-2", metadata: {}, createdAt: "2026-08-18T17:20:00+08:00" },
+]);
+
 const resetOpen = ref(false);
 const resetReason = ref("");
 const confirmation = ref("");
 const resetDone = ref(false);
 const resetBusy = ref(false);
 const resetError = ref("");
-const epoch = ref(4);
+const moderationTarget = ref<OperationsUser | null>(null);
+const moderationReason = ref("");
+const moderationBusy = ref(false);
+const moderationError = ref("");
+const reportTarget = ref<Report | null>(null);
+const reportDecision = ref<"resolved" | "dismissed">("resolved");
+const reportReason = ref("");
+const reportBusy = ref(false);
+const reportError = ref("");
+const roomDetail = ref<AdminRoomSnapshot | null>(null);
+const roomDetailBusy = ref(false);
+const roomDetailError = ref("");
+let resetTimer: number | undefined;
+let searchTimer: number | undefined;
 
-const rooms = [
-  { id: "RF-2806", name: "周六夜场", owner: "岱奇", players: "6 / 8", blind: "5 / 10", hand: 28, voice: "正常", state: "进行中" },
-  { id: "RF-9132", name: "慢速夜场", owner: "阿桥", players: "4 / 6", blind: "2 / 5", hand: 11, voice: "2 人关闭", state: "进行中" },
-  { id: "RF-0475", name: "练习桌", owner: "小北", players: "2 / 8", blind: "10 / 20", hand: 0, voice: "正常", state: "等候中" },
-];
-const users = [
-  { name: "岱奇", phone: "138 **** 2806", score: 1860, room: "RF-2806", status: "正常", updatedAt: "22:48" },
-  { name: "阿桥", phone: "139 **** 1408", score: 3680, room: "RF-2806", status: "正常", updatedAt: "22:47" },
-  { name: "远山", phone: "186 **** 9021", score: -240, room: "RF-2806", status: "正常", updatedAt: "22:45" },
-  { name: "林度", phone: "137 **** 6110", score: 610, room: "RF-2806", status: "正常", updatedAt: "22:43" },
-];
-const audits = ref([
-  { time: "2026-08-20 10:34", operator: "ops.li", action: "全站积分重置", detail: "Epoch 3 → 4，基线 1,000，季度演练", result: "成功" },
-  { time: "2026-08-18 17:20", operator: "ops.chen", action: "用户解除封禁", detail: "用户 U-01842", result: "成功" },
-]);
+const roomById = computed(() => new Map(rooms.value.map((room) => [room.id, room])));
+const filteredUsers = computed(() => {
+  const query = search.value.trim().toLowerCase();
+  if (!query || apiMode) return users.value;
+  return users.value.filter((user) => `${user.id}${user.nickname}${user.phone}${user.activeRoomId ?? ""}`.toLowerCase().includes(query));
+});
+const openReports = computed(() => reports.value.filter((report) => report.status === "open" || report.status === "reviewing"));
+const playingRooms = computed(() => rooms.value.filter((room) => room.status === "playing").length);
+const onlinePlayers = computed(() => rooms.value.reduce((total, room) => total + room.onlinePlayers, 0));
 
-const filteredUsers = computed(() => users.filter((user) => `${user.name}${user.phone}${user.room}`.toLowerCase().includes(search.value.toLowerCase())));
+function errorMessage(reason: unknown, fallback: string) {
+  return reason instanceof Error ? reason.message : fallback;
+}
+
+async function loadAll() {
+  if (!apiMode) return;
+  loading.value = true;
+  loadErrors.value = [];
+  const [epochResult, roomResult, userResult, reportResult, auditResult] = await Promise.allSettled([
+    adminApi.epochs(), adminApi.rooms(), adminApi.users(search.value.trim()), adminApi.reports(), adminApi.audits(),
+  ]);
+  if (epochResult.status === "fulfilled" && epochResult.value.epochs[0]) epoch.value = epochResult.value.epochs[0].id;
+  else if (epochResult.status === "rejected") loadErrors.value.push(`积分周期：${errorMessage(epochResult.reason, "加载失败")}`);
+  if (roomResult.status === "fulfilled") rooms.value = roomResult.value.rooms;
+  else loadErrors.value.push(`活跃房间：${errorMessage(roomResult.reason, "加载失败")}`);
+  if (userResult.status === "fulfilled") users.value = userResult.value.users;
+  else loadErrors.value.push(`用户列表：${errorMessage(userResult.reason, "加载失败")}`);
+  if (reportResult.status === "fulfilled") reports.value = reportResult.value.reports;
+  else loadErrors.value.push(`举报队列：${errorMessage(reportResult.reason, "加载失败")}`);
+  if (auditResult.status === "fulfilled") audits.value = auditResult.value.audits;
+  else loadErrors.value.push(`审计记录：${errorMessage(auditResult.reason, "加载失败")}`);
+  loading.value = false;
+}
+
+async function refreshSection() {
+  if (!apiMode) return;
+  loading.value = true;
+  loadErrors.value = [];
+  try {
+    if (activeSection.value === "users") users.value = (await adminApi.users(search.value.trim())).users;
+    else if (activeSection.value === "reports") reports.value = (await adminApi.reports()).reports;
+    else if (activeSection.value === "audit") audits.value = (await adminApi.audits()).audits;
+    else rooms.value = (await adminApi.rooms()).rooms;
+  } catch (reason) {
+    loadErrors.value = [errorMessage(reason, "刷新失败，请稍后重试")];
+  } finally {
+    loading.value = false;
+  }
+}
 
 async function performReset() {
-  if (confirmation.value !== "RESET ALL SCORES" || resetReason.value.trim().length < 4) return;
+  if (confirmation.value !== "RESET ALL SCORES" || resetReason.value.trim().length < 4 || resetBusy.value) return;
   resetBusy.value = true;
   resetError.value = "";
   try {
     const previousEpoch = epoch.value;
-    if (apiMode) {
-      const result = await adminApi.resetScores(resetReason.value.trim());
-      epoch.value = result.epoch;
-    } else {
-      epoch.value += 1;
-    }
-    audits.value.unshift({ time: new Date().toLocaleString("zh-CN", { hour12: false }), operator: "ops.daichi", action: "全站积分重置", detail: `Epoch ${previousEpoch} → ${epoch.value}，基线 1,000，${resetReason.value.trim()}`, result: "成功" });
+    epoch.value = apiMode ? (await adminApi.resetScores(resetReason.value.trim())).epoch : epoch.value + 1;
+    audits.value.unshift({ id: crypto.randomUUID(), administratorId: "local-admin", action: "score.reset_all", targetType: "score_epoch", targetId: String(epoch.value), reason: resetReason.value.trim(), requestId: crypto.randomUUID(), metadata: { previousEpoch }, createdAt: new Date().toISOString() });
     resetDone.value = true;
-    window.setTimeout(() => closeReset(), 1400);
+    resetTimer = window.setTimeout(closeReset, 1400);
   } catch (reason) {
-    resetError.value = reason instanceof Error ? reason.message : "积分重置失败";
+    resetError.value = errorMessage(reason, "积分重置失败，请检查权限后重试");
   } finally {
     resetBusy.value = false;
   }
@@ -61,14 +134,110 @@ function closeReset() {
   resetError.value = "";
 }
 
-onMounted(async () => {
-  if (!apiMode) return;
+function openModeration(user: OperationsUser) {
+  moderationTarget.value = user;
+  moderationReason.value = "";
+  moderationError.value = "";
+}
+
+async function applyModeration() {
+  const target = moderationTarget.value;
+  if (!target || moderationReason.value.trim().length < 2 || moderationBusy.value) return;
+  moderationBusy.value = true;
+  moderationError.value = "";
   try {
-    const result = await adminApi.epochs();
-    if (result.epochs[0]) epoch.value = result.epochs[0].id;
-  } catch {
-    // Keep the audit shell usable when the API is offline.
+    const updated = apiMode
+      ? (await adminApi.setUserBanned(target.id, !target.banned, moderationReason.value.trim())).user
+      : { ...target, banned: !target.banned, updatedAt: new Date().toISOString() };
+    users.value = users.value.map((user) => user.id === updated.id ? updated : user);
+    moderationTarget.value = null;
+  } catch (reason) {
+    moderationError.value = errorMessage(reason, "用户状态修改失败，请重试");
+  } finally {
+    moderationBusy.value = false;
   }
+}
+
+function openReport(report: Report) {
+  reportTarget.value = report;
+  reportDecision.value = "resolved";
+  reportReason.value = "";
+  reportError.value = "";
+}
+
+async function handleReport() {
+  const target = reportTarget.value;
+  if (!target || reportReason.value.trim().length < 2 || reportBusy.value) return;
+  reportBusy.value = true;
+  reportError.value = "";
+  try {
+    const updated = apiMode
+      ? (await adminApi.resolveReport(target.id, reportDecision.value, reportReason.value.trim())).report
+      : { ...target, status: reportDecision.value, handledBy: "local-admin", handledAt: new Date().toISOString() };
+    reports.value = reports.value.map((report) => report.id === updated.id ? updated : report);
+    reportTarget.value = null;
+  } catch (reason) {
+    reportError.value = errorMessage(reason, "举报处理失败，请重试");
+  } finally {
+    reportBusy.value = false;
+  }
+}
+
+async function inspectRoom(room: AdminRoom) {
+  roomDetail.value = null;
+  roomDetailError.value = "";
+  roomDetailBusy.value = true;
+  try {
+    roomDetail.value = apiMode ? await adminApi.room(room.id) : {
+      roomId: room.id, roomCode: room.code, roomName: room.name, ownerId: room.ownerId, version: room.version,
+      handNumber: room.handNumber, street: room.status === "playing" ? "flop" : "waiting", pot: 145,
+      players: users.value.slice(0, room.players).map((user, index) => ({ id: user.id, name: user.nickname, seat: index, tablePoints: 1000, accountPoints: user.balance, status: "active", isReady: true, isMuted: false })),
+      config: { blindPreset: room.blindPreset, actionSeconds: 30, voiceEnabled: room.voiceEnabled, chipDenominations: [5, 10, 20, 50, 100] }, messages: [],
+    };
+  } catch (reason) {
+    roomDetailError.value = errorMessage(reason, "房间详情加载失败");
+  } finally {
+    roomDetailBusy.value = false;
+  }
+}
+
+function maskPhone(phone: string) {
+  return /^1\d{10}$/.test(phone) ? `${phone.slice(0, 3)} **** ${phone.slice(-4)}` : phone || "未绑定";
+}
+
+function formatTime(value: string) {
+  return new Intl.DateTimeFormat("zh-CN", { dateStyle: "short", timeStyle: "short", hour12: false, timeZone: "Asia/Shanghai" }).format(new Date(value));
+}
+
+function roomLabel(roomId?: string) {
+  return roomId ? roomById.value.get(roomId)?.code ?? roomId : "未在房间";
+}
+
+function statusLabel(status: AdminRoom["status"]) {
+  return status === "playing" ? "进行中" : status === "waiting" ? "等候中" : "已结束";
+}
+
+function reportCategory(category: Report["category"]) {
+  return { conduct: "行为秩序", voice: "语音问题", technical: "技术问题", other: "其他" }[category];
+}
+
+function auditAction(action: string) {
+  return { "score.reset_all": "全站积分重置", "user.ban": "用户封禁", "user.unban": "解除封禁", "report.resolved": "举报已解决", "report.dismissed": "举报已驳回" }[action] ?? action;
+}
+
+watch(search, () => {
+  if (!apiMode) return;
+  window.clearTimeout(searchTimer);
+  searchTimer = window.setTimeout(async () => {
+    try { users.value = (await adminApi.users(search.value.trim())).users; }
+    catch (reason) { loadErrors.value = [errorMessage(reason, "用户搜索失败")]; }
+  }, 300);
+});
+
+onMounted(loadAll);
+onBeforeUnmount(() => {
+  window.clearTimeout(resetTimer);
+  window.clearTimeout(searchTimer);
 });
 </script>
 
@@ -80,43 +249,64 @@ onMounted(async () => {
         <button :class="{ active: activeSection === 'overview' }" @click="activeSection = 'overview'"><Gauge />运行概览</button>
         <button :class="{ active: activeSection === 'users' }" @click="activeSection = 'users'"><Users />用户与积分</button>
         <button :class="{ active: activeSection === 'rooms' }" @click="activeSection = 'rooms'"><DoorOpen />活跃房间</button>
-        <button :class="{ active: activeSection === 'reports' }" @click="activeSection = 'reports'"><AlertTriangle />举报处理<span class="nav-count">2</span></button>
+        <button :class="{ active: activeSection === 'reports' }" @click="activeSection = 'reports'"><AlertTriangle />举报处理<span v-if="openReports.length" class="nav-count">{{ openReports.length }}</span></button>
         <button :class="{ active: activeSection === 'audit' }" @click="activeSection = 'audit'"><FileClock />审计记录</button>
       </nav>
-      <div class="admin-permission"><ShieldCheck /><span><strong>平台运营管理员</strong><small>score:reset-all</small></span></div>
+      <div class="admin-permission"><ShieldCheck /><span><strong>平台运营管理员</strong><small>admin:read · report:manage</small></span></div>
     </aside>
 
     <main class="admin-main">
-      <header class="admin-topbar"><div><h1>{{ { overview: '运行概览', users: '用户与积分', rooms: '活跃房间', reports: '举报处理', audit: '审计记录' }[activeSection] }}</h1><span>2026-08-24 · Asia/Shanghai</span></div><div class="operator"><span class="service-live">服务正常</span><button type="button"><CircleUserRound />ops.daichi<ChevronDown /></button></div></header>
+      <header class="admin-topbar">
+        <div><h1>{{ { overview: '运行概览', users: '用户与积分', rooms: '活跃房间', reports: '举报处理', audit: '审计记录' }[activeSection] }}</h1><span>{{ new Intl.DateTimeFormat('zh-CN', { dateStyle: 'long', timeZone: 'Asia/Shanghai' }).format(now) }} · Asia/Shanghai</span></div>
+        <div class="operator"><span class="service-live">{{ apiMode ? '实时接口' : '演示数据' }}</span><button type="button"><CircleUserRound />local-admin<ChevronDown /></button></div>
+      </header>
+
+      <div v-if="loadErrors.length" class="error-band" role="alert"><WifiOff /><span><strong>部分数据未更新</strong>{{ loadErrors.join('；') }}</span><button class="tool-button" type="button" @click="loadAll"><RefreshCw />重试</button></div>
 
       <template v-if="activeSection === 'overview'">
-        <section class="summary-band" aria-label="运行摘要"><div><span>在线连接</span><strong>864</strong><small><Activity />过去 5 分钟稳定</small></div><div><span>活跃房间</span><strong>120</strong><small><Radio />91 桌正在出牌</small></div><div><span>语音参与</span><strong>72%</strong><small>LiveKit 正常</small></div><div><span>待处理举报</span><strong>2</strong><small class="warning">最早等待 18 分钟</small></div></section>
-        <section class="operations-grid"><div class="operations-main"><header class="section-header"><div><h2>活跃房间</h2><span>按最近事件排序</span></div><button class="tool-button" type="button"><RefreshCw />刷新</button></header><div class="admin-table"><div class="admin-row head"><span>房间</span><span>房主</span><span>人数</span><span>盲注</span><span>手牌</span><span>语音</span><span>状态</span></div><div v-for="room in rooms" :key="room.id" class="admin-row"><span><strong>{{ room.name }}</strong><small>{{ room.id }}</small></span><span>{{ room.owner }}</span><span>{{ room.players }}</span><span>{{ room.blind }}</span><span># {{ String(room.hand).padStart(3, '0') }}</span><span>{{ room.voice }}</span><span><i :class="{ waiting: room.state === '等候中' }" />{{ room.state }}</span></div></div></div><aside class="operations-side"><section class="score-epoch"><header><h2>积分周期</h2><RotateCcw /></header><span>当前 Epoch</span><strong>{{ epoch }}</strong><p>全站基线 1,000，活跃牌局继续结算。</p><button class="danger-button" type="button" @click="resetOpen = true"><RotateCcw />重置全站积分</button></section><section class="system-feed"><header><h2>系统事件</h2><Clock3 /></header><ol><li><time>22:48</time><span>RF-2806 玩家自行增加 500 积分</span></li><li><time>22:43</time><span>LiveKit 节点丢包恢复正常</span></li><li><time>22:39</time><span>RF-9132 房主转移成功</span></li></ol></section></aside></section>
+        <section class="summary-band" aria-label="运行摘要">
+          <div><span>在线牌友</span><strong>{{ onlinePlayers }}</strong><small><Activity />按活跃房间实时汇总</small></div>
+          <div><span>活跃房间</span><strong>{{ rooms.length }}</strong><small><Radio />{{ playingRooms }} 桌正在出牌</small></div>
+          <div><span>已登记用户</span><strong>{{ users.length }}</strong><small><Users />当前查询范围</small></div>
+          <div><span>待处理举报</span><strong>{{ openReports.length }}</strong><small :class="{ warning: openReports.length > 0 }">{{ openReports.length ? '需要运营复核' : '队列已清空' }}</small></div>
+        </section>
+        <section class="operations-grid">
+          <div class="operations-main">
+            <header class="section-header"><div><h2>活跃房间</h2><span>按创建时间排序</span></div><button class="tool-button" type="button" :disabled="loading" @click="refreshSection"><RefreshCw :class="{ spin: loading }" />刷新</button></header>
+            <div class="admin-table"><div class="admin-row head"><span>房间</span><span>房主</span><span>人数</span><span>盲注</span><span>手牌</span><span>语音</span><span>状态</span></div><button v-for="room in rooms.slice(0, 8)" :key="room.id" class="admin-row row-button" type="button" @click="inspectRoom(room)"><span><strong>{{ room.name }}</strong><small>{{ room.code }}</small></span><span>{{ room.ownerName }}</span><span>{{ room.onlinePlayers }} / {{ room.maxPlayers }}</span><span>{{ room.blindPreset }}</span><span># {{ String(room.handNumber).padStart(3, '0') }}</span><span>{{ room.voiceEnabled ? '已启用' : '已关闭' }}</span><span><i :class="{ waiting: room.status === 'waiting' }" />{{ statusLabel(room.status) }}</span></button><div v-if="!rooms.length" class="table-empty"><Inbox />当前没有活跃房间</div></div>
+          </div>
+          <aside class="operations-side">
+            <section class="score-epoch"><header><h2>积分周期</h2><RotateCcw /></header><span>当前 Epoch</span><strong>{{ epoch }}</strong><p>全站基线 1,000，活跃牌局结束后照常结算净输赢。</p><button class="danger-button" type="button" @click="resetOpen = true"><RotateCcw />重置全站积分</button></section>
+            <section class="system-feed"><header><h2>最近审计</h2><Clock3 /></header><ol><li v-for="audit in audits.slice(0, 4)" :key="audit.id"><time>{{ formatTime(audit.createdAt).split(' ').at(-1) }}</time><span>{{ auditAction(audit.action) }} · {{ audit.reason }}</span></li><li v-if="!audits.length"><span>暂无管理员操作</span></li></ol></section>
+          </aside>
+        </section>
       </template>
 
       <template v-else-if="activeSection === 'users'">
-        <section class="admin-workspace"><header class="workspace-tools"><label><Search /><input v-model="search" placeholder="搜索昵称、手机号或房间码" /></label><button class="danger-button" type="button" @click="resetOpen = true"><RotateCcw />重置全站积分</button></header><div class="admin-table users-table"><div class="admin-row head"><span>用户</span><span>手机号</span><span>局外积分</span><span>当前房间</span><span>状态</span><span>最后事件</span></div><div v-for="user in filteredUsers" :key="user.phone" class="admin-row"><span><strong>{{ user.name }}</strong></span><span>{{ user.phone }}</span><span :class="{ negative: user.score < 0 }">{{ user.score.toLocaleString('zh-CN') }}</span><span>{{ user.room }}</span><span><i />{{ user.status }}</span><span>{{ user.updatedAt }}</span></div></div></section>
+        <section class="admin-workspace"><header class="workspace-tools"><label><Search /><input v-model="search" aria-label="搜索用户" placeholder="搜索昵称、手机号或用户 ID" /></label><button class="danger-button" type="button" @click="resetOpen = true"><RotateCcw />重置全站积分</button></header>
+          <div class="admin-table users-table"><div class="admin-row head"><span>用户</span><span>手机号</span><span>局外积分</span><span>当前房间</span><span>状态</span><span>最后事件</span><span>操作</span></div><div v-for="user in filteredUsers" :key="user.id" class="admin-row"><span class="truncate"><strong>{{ user.nickname }}</strong><small>{{ user.id }}</small></span><span>{{ maskPhone(user.phone) }}</span><span :class="{ negative: user.balance < 0 }">{{ user.balance.toLocaleString('zh-CN') }}</span><span class="truncate">{{ roomLabel(user.activeRoomId) }}</span><span><i :class="{ banned: user.banned }" />{{ user.banned ? '已封禁' : '正常' }}</span><span>{{ formatTime(user.updatedAt) }}</span><span><button class="icon-action" type="button" :title="user.banned ? '解除封禁' : '封禁用户'" @click="openModeration(user)"><Unlock v-if="user.banned" /><Ban v-else /></button></span></div><div v-if="!filteredUsers.length" class="table-empty"><Search />没有匹配的用户</div></div>
+        </section>
       </template>
 
       <template v-else-if="activeSection === 'rooms'">
-        <section class="admin-workspace"><header class="section-header"><div><h2>全部活跃房间</h2><span>{{ rooms.length }} 个演示房间</span></div></header><div class="admin-table"><div class="admin-row head"><span>房间</span><span>房主</span><span>人数</span><span>盲注</span><span>手牌</span><span>语音</span><span>状态</span></div><div v-for="room in rooms" :key="room.id" class="admin-row"><span><strong>{{ room.name }}</strong><small>{{ room.id }}</small></span><span>{{ room.owner }}</span><span>{{ room.players }}</span><span>{{ room.blind }}</span><span># {{ room.hand }}</span><span>{{ room.voice }}</span><span><i />{{ room.state }}</span></div></div></section>
+        <section class="admin-workspace"><header class="section-header"><div><h2>全部活跃房间</h2><span>{{ rooms.length }} 个房间由当前服务实例持有租约</span></div><button class="tool-button" type="button" :disabled="loading" @click="refreshSection"><RefreshCw :class="{ spin: loading }" />刷新</button></header><div class="admin-table"><div class="admin-row head"><span>房间</span><span>房主</span><span>在线 / 座位</span><span>盲注</span><span>手牌</span><span>语音</span><span>状态</span></div><button v-for="room in rooms" :key="room.id" class="admin-row row-button" type="button" @click="inspectRoom(room)"><span><strong>{{ room.name }}</strong><small>{{ room.code }} · v{{ room.version }}</small></span><span>{{ room.ownerName }}</span><span>{{ room.onlinePlayers }} / {{ room.players }}</span><span>{{ room.blindPreset }}</span><span># {{ room.handNumber }}</span><span>{{ room.voiceEnabled ? '已启用' : '已关闭' }}</span><span><i :class="{ waiting: room.status === 'waiting' }" />{{ statusLabel(room.status) }}</span></button><div v-if="!rooms.length" class="table-empty"><DoorOpen />当前没有活跃房间</div></div></section>
       </template>
 
       <template v-else-if="activeSection === 'reports'">
-        <section class="empty-operation"><AlertTriangle /><h2>2 条举报等待处理</h2><p>举报只包含房间、成员、时间与连接元数据，不包含语音录音。</p><button class="tool-button" type="button">打开处理队列</button></section>
+        <section class="admin-workspace"><header class="section-header"><div><h2>举报处理队列</h2><span>{{ openReports.length }} 条等待复核，语音不会被录制或附在举报中</span></div><button class="tool-button" type="button" :disabled="loading" @click="refreshSection"><RefreshCw :class="{ spin: loading }" />刷新</button></header><div class="report-list"><article v-for="report in reports" :key="report.id"><header><span class="report-category">{{ reportCategory(report.category) }}</span><time>{{ formatTime(report.createdAt) }}</time><b :class="report.status">{{ { open: '待处理', reviewing: '复核中', resolved: '已解决', dismissed: '已驳回' }[report.status] }}</b></header><p>{{ report.detail }}</p><footer><span>举报人 {{ report.reporterId }}<template v-if="report.roomId"> · 房间 {{ roomLabel(report.roomId) }}</template><template v-if="report.subjectUserId"> · 对象 {{ report.subjectUserId }}</template></span><button v-if="report.status === 'open' || report.status === 'reviewing'" class="tool-button" type="button" @click="openReport(report)"><CheckCircle2 />处理</button></footer></article><div v-if="!reports.length" class="table-empty"><Inbox />举报队列为空</div></div></section>
       </template>
 
       <template v-else>
-        <section class="admin-workspace"><header class="section-header"><div><h2>管理员操作</h2><span>积分重置和权限操作永久保留</span></div></header><div class="audit-list"><article v-for="audit in audits" :key="`${audit.time}-${audit.action}`"><time>{{ audit.time }}</time><span><strong>{{ audit.action }}</strong><small>{{ audit.operator }}</small></span><p>{{ audit.detail }}</p><b><CheckCircle2 />{{ audit.result }}</b></article></div></section>
+        <section class="admin-workspace"><header class="section-header"><div><h2>管理员操作</h2><span>积分重置、封禁和举报处理永久保留</span></div><button class="tool-button" type="button" :disabled="loading" @click="refreshSection"><RefreshCw :class="{ spin: loading }" />刷新</button></header><div class="audit-list"><article v-for="audit in audits" :key="audit.id"><time>{{ formatTime(audit.createdAt) }}</time><span><strong>{{ auditAction(audit.action) }}</strong><small>{{ audit.administratorId }}</small></span><p>{{ audit.reason }}<small v-if="audit.targetId">{{ audit.targetType }} · {{ audit.targetId }}</small></p><b><CheckCircle2 />已记录</b></article><div v-if="!audits.length" class="table-empty"><FileClock />暂无审计记录</div></div></section>
       </template>
     </main>
 
-    <div v-if="resetOpen" class="modal-backdrop" @click.self="closeReset">
-      <section class="reset-dialog" role="dialog" aria-modal="true" aria-labelledby="reset-title">
-        <header><span><AlertTriangle /></span><div><h2 id="reset-title">重置全站积分</h2><p>所有账号将立即进入新的积分周期。</p></div><button type="button" aria-label="关闭" @click="closeReset"><X /></button></header>
-        <template v-if="!resetDone"><div class="reset-impact"><strong>不会中断活跃牌局</strong><p>当前余额统一变为 1,000；进行中牌局结束后，净输赢继续结算到新周期。</p></div><label>重置原因<textarea v-model="resetReason" rows="3" placeholder="至少填写 4 个字" /></label><label>输入 RESET ALL SCORES 确认<input v-model="confirmation" autocomplete="off" /></label><p v-if="resetError" class="reset-error">{{ resetError }}</p><footer><button class="tool-button" type="button" @click="closeReset">取消</button><button class="danger-button" type="button" :disabled="resetBusy || confirmation !== 'RESET ALL SCORES' || resetReason.trim().length < 4" @click="performReset"><RotateCcw />{{ resetBusy ? "正在重置" : "确认重置" }}</button></footer></template>
-        <div v-else class="reset-success" role="status"><CheckCircle2 /><strong>重置已完成</strong><span>当前积分周期为 Epoch {{ epoch }}</span></div>
-      </section>
-    </div>
+    <aside v-if="roomDetailBusy || roomDetail || roomDetailError" class="detail-drawer" aria-label="房间详情"><header><div><h2>{{ roomDetail?.roomName ?? '房间详情' }}</h2><span>{{ roomDetail?.roomCode }}</span></div><button type="button" aria-label="关闭房间详情" @click="roomDetail = null; roomDetailError = ''; roomDetailBusy = false"><X /></button></header><div v-if="roomDetailBusy" class="drawer-state"><LoaderCircle class="spin" />正在读取权威快照</div><div v-else-if="roomDetailError" class="drawer-state error"><WifiOff />{{ roomDetailError }}</div><template v-else-if="roomDetail"><dl><div><dt>牌局阶段</dt><dd>{{ roomDetail.street }}</dd></div><div><dt>手牌 / 版本</dt><dd>#{{ roomDetail.handNumber }} · v{{ roomDetail.version }}</dd></div><div><dt>底池</dt><dd>{{ roomDetail.pot.toLocaleString('zh-CN') }}</dd></div><div><dt>盲注</dt><dd>{{ roomDetail.config.blindPreset }}</dd></div></dl><h3>座位状态</h3><ol class="drawer-players"><li v-for="player in roomDetail.players" :key="player.id"><span><strong>{{ player.name }}</strong><small>{{ player.id }} · {{ player.seat + 1 }} 号位</small></span><b>{{ player.tablePoints.toLocaleString('zh-CN') }}</b><em>{{ player.status }}</em></li></ol><h3>筹码面额</h3><div class="drawer-chips"><span v-for="chip in roomDetail.config.chipDenominations" :key="chip">{{ chip }}</span></div></template></aside>
+
+    <div v-if="resetOpen" class="modal-backdrop" @click.self="closeReset"><section class="reset-dialog" role="dialog" aria-modal="true" aria-labelledby="reset-title"><header><span><AlertTriangle /></span><div><h2 id="reset-title">重置全站积分</h2><p>所有账号将立即进入新的积分周期。</p></div><button type="button" aria-label="关闭" @click="closeReset"><X /></button></header><template v-if="!resetDone"><div class="reset-impact"><strong>不会中断活跃牌局</strong><p>当前余额统一变为 1,000；进行中牌局结束后，净输赢继续结算到新周期。</p></div><label>重置原因<textarea v-model="resetReason" maxlength="500" rows="3" placeholder="至少填写 4 个字" /></label><label>输入 RESET ALL SCORES 确认<input v-model="confirmation" autocomplete="off" /></label><p v-if="resetError" class="reset-error" role="alert">{{ resetError }}</p><footer><button class="tool-button" type="button" @click="closeReset">取消</button><button class="danger-button" type="button" :disabled="resetBusy || confirmation !== 'RESET ALL SCORES' || resetReason.trim().length < 4" @click="performReset"><LoaderCircle v-if="resetBusy" class="spin" /><RotateCcw v-else />{{ resetBusy ? '正在重置' : '确认重置' }}</button></footer></template><div v-else class="reset-success" role="status"><CheckCircle2 /><strong>重置已完成</strong><span>当前积分周期为 Epoch {{ epoch }}</span></div></section></div>
+
+    <div v-if="moderationTarget" class="modal-backdrop" @click.self="moderationTarget = null"><section class="action-dialog" role="dialog" aria-modal="true" aria-labelledby="moderation-title"><header><span :class="{ safe: moderationTarget.banned }"><Unlock v-if="moderationTarget.banned" /><Ban v-else /></span><div><h2 id="moderation-title">{{ moderationTarget.banned ? '解除用户封禁' : '封禁用户' }}</h2><p>{{ moderationTarget.nickname }} · {{ moderationTarget.id }}</p></div><button type="button" aria-label="关闭" @click="moderationTarget = null"><X /></button></header><label>操作原因<textarea v-model="moderationReason" maxlength="500" rows="3" placeholder="至少填写 2 个字" /></label><p v-if="moderationError" class="reset-error" role="alert">{{ moderationError }}</p><footer><button class="tool-button" type="button" @click="moderationTarget = null">取消</button><button :class="moderationTarget.banned ? 'confirm-button' : 'danger-button'" type="button" :disabled="moderationBusy || moderationReason.trim().length < 2" @click="applyModeration"><LoaderCircle v-if="moderationBusy" class="spin" /><Unlock v-else-if="moderationTarget.banned" /><Ban v-else />确认{{ moderationTarget.banned ? '解封' : '封禁' }}</button></footer></section></div>
+
+    <div v-if="reportTarget" class="modal-backdrop" @click.self="reportTarget = null"><section class="action-dialog" role="dialog" aria-modal="true" aria-labelledby="report-title"><header><span><AlertTriangle /></span><div><h2 id="report-title">处理举报</h2><p>{{ reportCategory(reportTarget.category) }} · {{ reportTarget.id }}</p></div><button type="button" aria-label="关闭" @click="reportTarget = null"><X /></button></header><div class="decision-control" role="group" aria-label="处理结论"><button type="button" :class="{ active: reportDecision === 'resolved' }" @click="reportDecision = 'resolved'"><CheckCircle2 />已解决</button><button type="button" :class="{ active: reportDecision === 'dismissed' }" @click="reportDecision = 'dismissed'"><XCircle />驳回</button></div><label>处理原因<textarea v-model="reportReason" maxlength="500" rows="3" placeholder="至少填写 2 个字" /></label><p v-if="reportError" class="reset-error" role="alert">{{ reportError }}</p><footer><button class="tool-button" type="button" @click="reportTarget = null">取消</button><button class="confirm-button" type="button" :disabled="reportBusy || reportReason.trim().length < 2" @click="handleReport"><LoaderCircle v-if="reportBusy" class="spin" /><CheckCircle2 v-else />提交处理结果</button></footer></section></div>
   </div>
 </template>
