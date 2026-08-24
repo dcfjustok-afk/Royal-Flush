@@ -26,9 +26,12 @@ flowchart LR
   F --> G[server]
   F --> H[web]
   F --> I[admin]
+  G --> J[Production smoke]
+  H --> J
+  I --> J
 ```
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) 会执行 Go 测试与静态检查、Node 测试与构建、契约漂移检查、Playwright 流程和实时容量烟测。所有任务最终汇总为一个名为 `Deployment gate` 的检查。
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) 会执行 Go 测试与静态检查、Node 测试与构建、契约漂移检查、Playwright 流程、实时容量烟测，并真实构建三个生产 Dockerfile。所有任务最终汇总为一个名为 `Deployment gate` 的检查；Playwright 的 HTML 报告、截图、视频与 trace 会作为 7 天诊断产物上传。工作流引用的第三方 Action 固定到完整 commit SHA，降低可变标签带来的供应链风险。
 
 在 GitHub 仓库的 **Settings → Rules → Rulesets** 中为 `main` 创建规则：
 
@@ -39,6 +42,8 @@ flowchart LR
 5. 不允许管理员日常绕过该规则直接推送生产分支。
 
 Zeabur 的 GitHub 自动部署由 `main` 的 push 触发，并不会等待同一次 push 上刚启动的 GitHub Actions。因此质量门禁必须发生在 Pull Request 合并之前：CI 失败时不能进入 `main`；成功合并后，进入 `main` 的提交已经通过完整检查，Zeabur 才开始部署。
+
+Zeabur 回写成功的 `deployment_status` 后，[`.github/workflows/production-smoke.yml`](.github/workflows/production-smoke.yml) 会串联验证 `https://royal-flush.zeabur.app/`、`/api/v1/ready` 与 `https://royal-flush-admin.zeabur.app/`。同一时间只保留最新一次生产冒烟；它还会创建带正确玩家端 URL 的 GitHub `production` 环境记录，修正 Zeabur 原始状态中空 `environment_url` 导致的不可点击问题。该工作流也支持手动触发。
 
 ## 先处理当前构建预览
 
@@ -78,7 +83,7 @@ Start: node index.js
 1. 选择“添加服务 → GitHub”，选择 `dcfjustok-afk/Royal-Flush` 仓库和 `main` 分支。
 2. 将服务名设为小写的 `server`。这个名称会生成供其他服务使用的 `SERVER_HOST`。
 3. 在服务变量中录入 [server.env.example](deploy/zeabur/server.env.example) 的内容。
-4. 将 `ADMIN_PHONES` 替换为实际运营手机号；多个号码使用英文逗号分隔，例如 `手机号A,手机号B`。
+4. 将 `ADMIN_ACCOUNT`、`ADMIN_PASSWORD` 设置为运营管理员凭据；两者只写入 Zeabur `server` 服务环境变量。
 5. 不要手动设置 `PORT`。Zeabur 会注入监听端口，程序默认兼容 `8080`。
 6. 确认构建计划使用 `Dockerfile.server` 后再部署。
 7. 将健康检查路径设为 `/api/v1/ready`。
@@ -122,7 +127,7 @@ API_UPSTREAM=http://${SERVER_HOST}:8080
 5. 将健康检查路径设为 `/`。
 6. 为 `admin` 绑定与玩家端不同的 HTTPS 域名。
 
-运营端首次打开时会要求手机号验证码登录。只有 `ADMIN_PHONES` 中的手机号能进入控制台；其他手机号即使通过验证码，也会停留在“没有运营权限”页面。玩家端和运营端域名不同，所以两边需要分别登录一次。
+运营端首次打开时要求管理员账号和密码登录。账号与密码只通过 `ADMIN_ACCOUNT`、`ADMIN_PASSWORD` 环境变量注入服务端，不写入前端代码、仓库或日志；玩家端仍使用手机号验证码登录。玩家端和运营端域名不同，所以两边需要分别登录一次。
 
 ## 6. 配置按路径重部署
 
@@ -169,17 +174,18 @@ LIVEKIT_API_SECRET=你的-api-secret
 2. `https://玩家域名/api/v1/ready` 返回 `{"status":"ready"...}`。
 3. 玩家域名能打开邀请/大厅页面，使用预览验证码 `123456` 完成登录。
 4. 创建房间后，第二个浏览器会话可以加入；行动和断线重连正常。
-5. 运营域名能使用 `ADMIN_PHONES` 中的号码登录，并看到用户、房间、举报和审计数据。
+5. 运营域名能使用 `ADMIN_ACCOUNT`、`ADMIN_PASSWORD` 登录，并看到用户、房间、举报和审计数据。
 6. 执行全站积分重置前填写原因并完成二次确认；活跃牌局不应中断。
 7. 配置 LiveKit Cloud 后，再验证麦克风授权、设备切换、房主禁言和语音断线降级。
 8. 合并一个只修改 `apps/web` 的测试 Pull Request，确认 CI 的 `Deployment gate` 通过后只有 `web` 产生新部署。
 9. 在 Zeabur 部署记录中确认 commit SHA 与 GitHub `main` 最新提交一致。
+10. 在 GitHub Actions 中确认 `Production smoke / Verify production` 通过，并可从 `production` 环境直接打开玩家端。
 
 ## 变量检查表
 
 | 服务     | 必填变量                                                                                            | 可选变量                                               |
 | -------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| `server` | `ZBPACK_DOCKERFILE_NAME`、`ENVIRONMENT`、`DATABASE_URL`、`REDIS_URL`、`INSTANCE_ID`、`ADMIN_PHONES` | `LIVEKIT_URL`、`LIVEKIT_API_KEY`、`LIVEKIT_API_SECRET` |
+| `server` | `ZBPACK_DOCKERFILE_NAME`、`ENVIRONMENT`、`DATABASE_URL`、`REDIS_URL`、`INSTANCE_ID`、`ADMIN_ACCOUNT`、`ADMIN_PASSWORD` | `LIVEKIT_URL`、`LIVEKIT_API_KEY`、`LIVEKIT_API_SECRET` |
 | `web`    | `ZBPACK_DOCKERFILE_NAME`、`API_UPSTREAM`                                                            | 无                                                     |
 | `admin`  | `ZBPACK_DOCKERFILE_NAME`、`API_UPSTREAM`                                                            | 无                                                     |
 

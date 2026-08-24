@@ -81,6 +81,8 @@ func main() {
 	applicationConfig := httpapi.Config{
 		Development:    development,
 		AllowedOrigins: splitCSV(os.Getenv("ALLOWED_ORIGINS")),
+		AdminAccount:   os.Getenv("ADMIN_ACCOUNT"),
+		AdminPassword:  os.Getenv("ADMIN_PASSWORD"),
 		Voice:          voice.Config{URL: os.Getenv("LIVEKIT_URL"), APIKey: os.Getenv("LIVEKIT_API_KEY"), APISecret: os.Getenv("LIVEKIT_API_SECRET")},
 		Readiness: func(ctx context.Context) error {
 			for _, check := range readinessChecks {

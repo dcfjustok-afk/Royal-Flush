@@ -224,6 +224,8 @@ fieldset { min-width: 0; margin: 0 0 18px; border: 0; padding: 0; }
 .ledger-row strong { color: var(--mint); }
 .ledger-row strong.negative { color: #ef8d82; }
 .ledger-head { min-height: 38px; color: var(--muted); font-size: 0.62rem; }
+.ledger-empty { display: flex; min-height: 180px; align-items: center; justify-content: center; gap: 10px; border-bottom: 1px solid var(--line-soft); color: var(--muted); font-size: 0.74rem; }
+.ledger-empty svg { width: 16px; height: 16px; color: var(--amber); }
 .ledger-head span:nth-child(4), .ledger-head span:nth-child(5) { justify-self: end; }
 .profile-side { display: grid; align-content: start; gap: 18px; }
 .account-facts { border-top: 1px solid var(--line); padding-top: 18px; }
@@ -303,7 +305,6 @@ fieldset { min-width: 0; margin: 0 0 18px; border: 0; padding: 0; }
 .table-telemetry span { display: flex; align-items: center; gap: 5px; }
 .table-telemetry span:first-child { color: var(--mint); }
 .table-telemetry strong { color: var(--bone); font: 700 1rem/1 var(--numeric); }
-.table-demo-marker { position: absolute; top: 18px; left: 28px; z-index: 6; border: 1px solid #665638; border-radius: 3px; background: #292319; color: var(--amber); padding: 4px 7px; font-size: 0.54rem; font-weight: 700; }
 .poker-table-shell { position: absolute; left: 50%; top: 50%; width: min(810px, 62vw); aspect-ratio: 2.12 / 1; transform: translate(-50%, -47%); }
 .poker-table { position: absolute; inset: 0; display: grid; place-items: center; border: 2px solid #595b54; border-radius: 50%; background: var(--table); box-shadow: 0 22px 60px rgba(0,0,0,.38), inset 0 0 0 13px #1a1b18, inset 0 0 0 14px #464842; }
 .poker-table::before { position: absolute; inset: 14%; border: 1px solid #41423d; border-radius: 50%; content: ""; }
@@ -397,6 +398,7 @@ fieldset { min-width: 0; margin: 0 0 18px; border: 0; padding: 0; }
 .event-log li > span.score { background: var(--red); }
 .event-log li > span.action { background: var(--mint); }
 .event-log p { color: #cbc8be; font-size: 0.67rem; line-height: 1.5; }
+.event-log-empty { grid-template-columns: 1fr !important; justify-items: center; color: var(--muted); }
 .side-rules, .side-voice, .room-management, .quick-message-panel, .report-panel { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 18px; }
 .side-rules > header, .side-voice > header, .room-management > header, .quick-message-panel > header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .side-rules > header svg, .side-voice > header svg, .room-management > header svg, .quick-message-panel > header svg { width: 15px; height: 15px; color: var(--muted); }
@@ -527,8 +529,6 @@ fieldset { min-width: 0; margin: 0 0 18px; border: 0; padding: 0; }
   .system-broadcast time { display: none; }
   .table-telemetry { top: 9px; right: 12px; left: 12px; justify-content: space-between; gap: 8px; }
   .table-telemetry span:first-child { display: none; }
-  .table-demo-marker { top: 8px; left: 10px; padding: 3px 5px; font-size: 0.5rem; }
-  .table-demo-marker + .table-telemetry { left: 96px; justify-content: flex-end; }
   .poker-table-shell { top: 52%; width: 94vw; min-width: 360px; aspect-ratio: 1.45 / 1; }
   .poker-table { border-radius: 42%; box-shadow: inset 0 0 0 8px #1a1b18, inset 0 0 0 9px #464842, 0 14px 36px rgba(0,0,0,.38); }
   .community-cards { gap: 4px; }

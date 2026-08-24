@@ -176,6 +176,31 @@ func TestOTPAndWebSocketSnapshot(t *testing.T) {
 	}
 }
 
+func TestAdminPasswordLogin(t *testing.T) {
+	application := New(Config{Development: true, AdminAccount: "19970606473", AdminPassword: "123456"}, nil)
+	t.Cleanup(application.Close)
+	server := httptest.NewServer(application.Handler())
+	defer server.Close()
+	client := server.Client()
+
+	response := request(t, client, http.MethodPost, server.URL+"/api/v1/auth/password/login", map[string]any{"account": "19970606473", "password": "wrong"}, nil)
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("invalid password status = %d", response.StatusCode)
+	}
+	response.Body.Close()
+	response = request(t, client, http.MethodPost, server.URL+"/api/v1/auth/password/login", map[string]any{"account": "19970606473", "password": "123456"}, nil)
+	if response.StatusCode != http.StatusOK || len(response.Cookies()) != 1 {
+		t.Fatalf("admin login status/cookie = %d/%d", response.StatusCode, len(response.Cookies()))
+	}
+	cookie := response.Cookies()[0].String()
+	response.Body.Close()
+	response = request(t, client, http.MethodGet, server.URL+"/api/v1/admin/users", nil, map[string]string{"Cookie": cookie})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("admin session status = %d: %s", response.StatusCode, readBody(response))
+	}
+	response.Body.Close()
+}
+
 func TestConfiguredAdminPhoneGrantsOperationsPermissions(t *testing.T) {
 	application := New(Config{Development: true, AdminPhones: map[string]bool{"13800138000": true}}, nil)
 	t.Cleanup(application.Close)

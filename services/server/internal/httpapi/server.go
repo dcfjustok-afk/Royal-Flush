@@ -23,6 +23,8 @@ import (
 type Config struct {
 	Development    bool
 	AllowedOrigins []string
+	AdminAccount   string
+	AdminPassword  string
 	Voice          voice.Config
 	Readiness      func(context.Context) error
 	ScoreStore     score.Store
@@ -88,6 +90,7 @@ func (s *Server) routes() http.Handler {
 	router.Get("/api/v1/ready", s.readiness)
 	router.Post("/api/v1/auth/otp/request", s.requestOTP)
 	router.Post("/api/v1/auth/otp/verify", s.verifyOTP)
+	router.Post("/api/v1/auth/password/login", s.passwordLogin)
 	router.Get("/api/v1/rooms/{roomID}/public", s.publicRoom)
 	router.Group(func(protected chi.Router) {
 		protected.Use(s.authenticate)
@@ -147,7 +150,7 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			ok = true
 		}
 		if !ok {
-			writeProblem(writer, http.StatusUnauthorized, "authentication_required", "请先完成手机号验证码登录")
+			writeProblem(writer, http.StatusUnauthorized, "authentication_required", "请先完成登录")
 			return
 		}
 		if s.config.AdminUserIDs[user.ID] || s.config.AdminPhones[user.Phone] {
@@ -240,6 +243,8 @@ func writeDomainError(writer http.ResponseWriter, err error) {
 		status, code = http.StatusTooManyRequests, "score_rate_limited"
 	case errors.Is(err, auth.ErrInvalidCode):
 		status, code = http.StatusUnauthorized, "invalid_otp"
+	case errors.Is(err, auth.ErrInvalidCredentials):
+		status, code = http.StatusUnauthorized, "invalid_credentials"
 	case errors.Is(err, operations.ErrUserNotFound), errors.Is(err, operations.ErrReportNotFound):
 		status, code = http.StatusNotFound, "not_found"
 	case errors.Is(err, operations.ErrReasonRequired), errors.Is(err, operations.ErrInvalidStatus):

@@ -38,3 +38,19 @@ func TestExpiredOTP(t *testing.T) {
 		t.Fatalf("expected expiry, got %v", err)
 	}
 }
+
+func TestPasswordLogin(t *testing.T) {
+	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	service := NewService(false, func() time.Time { return now })
+	if _, _, err := service.PasswordLogin("19970606473", "wrong", "19970606473", "123456"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("expected invalid credentials, got %v", err)
+	}
+	user, token, err := service.PasswordLogin("19970606473", "123456", "19970606473", "123456")
+	if err != nil || token == "" || user.ID != "admin-19970606473" || !user.Has("score:reset-all") {
+		t.Fatalf("password login failed: %#v %q %v", user, token, err)
+	}
+	fromSession, ok := service.UserBySession(token)
+	if !ok || fromSession.ID != user.ID {
+		t.Fatal("password session lookup failed")
+	}
+}

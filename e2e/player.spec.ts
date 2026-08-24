@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { mockPlayerApi } from "./support/api-mocks";
 
 async function expectInsideViewport(locator: Locator, page: Page) {
   const box = await locator.boundingBox();
@@ -12,6 +13,7 @@ async function expectInsideViewport(locator: Locator, page: Page) {
 }
 
 test.beforeEach(async ({ page }) => {
+  await mockPlayerApi(page);
   await page.emulateMedia({ reducedMotion: "reduce" });
 });
 
@@ -19,7 +21,7 @@ test("牌桌在目标视口内保持完整且筹码不会改变布局", async ({
   await page.goto("/rooms/room-saturday/table");
   await expect(page.locator(".table-app")).toBeVisible();
   await expect(page.locator(".community-cards .playing-card")).toHaveCount(5);
-  await expect(page.locator(".table-demo-marker")).toBeVisible();
+  await expect(page.locator(".network-status")).toContainText("连接稳定");
   await expect(page.locator(".station-voice")).toContainText("当前无人说话");
   await expect(page.locator(".player-seat.speaking")).toHaveCount(0);
   await expect(page.locator(".player-seat.acting")).toHaveAttribute("style", /--turn-progress: [0-9.]+turn/);

@@ -1,0 +1,40 @@
+name: Production smoke
+
+on:
+  deployment_status:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: production-smoke
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify production
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.deployment_status.state == 'success' &&
+       github.event.deployment.environment == 'production' &&
+       github.event.deployment_status.creator.login != 'github-actions[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment:
+      name: production
+      url: https://royal-flush.zeabur.app/
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Verify public services
+        env:
+          WEB_URL: https://royal-flush.zeabur.app/
+          ADMIN_URL: https://royal-flush-admin.zeabur.app/
+        run: npm run smoke:production

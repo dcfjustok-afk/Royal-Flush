@@ -1,8 +1,17 @@
 import { expect, test } from "@playwright/test";
+import { mockAdminApi } from "./support/api-mocks";
 
 test.beforeEach(async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1440", "运营台以桌面端为目标");
+  await mockAdminApi(page, { authenticated: !testInfo.title.includes("账号密码") });
   await page.goto("http://127.0.0.1:43174");
+});
+
+test("运营管理员可以用账号密码登录", async ({ page }) => {
+  await page.getByLabel("管理员账号").fill("ops-e2e");
+  await page.getByLabel("管理员密码").fill("correct-horse-battery-staple");
+  await page.getByRole("button", { name: "登录运营台" }).click();
+  await expect(page.getByRole("heading", { name: "运行概览" })).toBeVisible();
 });
 
 test("运营管理员可以审计式解封并处理举报", async ({ page }) => {

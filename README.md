@@ -57,7 +57,9 @@ Zeabur 需要将 PostgreSQL、Redis、Go API、玩家端和运营端拆成五个
 
 ## CI/CD
 
-GitHub Actions 会在 push 和 Pull Request 上执行 Go、Node、契约、Playwright 与容量检查，并汇总为 `Deployment gate`。生产流程要求保护 `main`：只有通过该检查的 Pull Request 才能合并；合并产生的 `main` push 由 Zeabur GitHub App 自动部署。该流程不需要在 GitHub Secrets 中保存 Zeabur API Key。
+GitHub Actions 会在指向 `main` 的 Pull Request 和 `main` push 上执行 Go、Node、契约、Playwright、容量检查，并真实构建 `server`、`web`、`admin` 三个生产镜像，最终汇总为稳定命名的 `Deployment gate`。失败的 Playwright 运行会保留 7 天诊断产物，便于直接下载截图、视频和 trace。
+
+生产流程要求保护 `main`：只有通过该检查的 Pull Request 才能合并；合并产生的 `main` push 由 Zeabur GitHub App 自动部署。Zeabur 回报部署成功后，[`.github/workflows/production-smoke.yml`](.github/workflows/production-smoke.yml) 会检查玩家端、运营端和后端 readiness，并在 GitHub `production` 环境中登记可点击的玩家端地址。该流程不需要在 GitHub Secrets 中保存 Zeabur API Key。
 
 Zeabur 三个服务的 Watch Paths 样例位于 `deploy/zeabur/watch-paths`。只修改后端时仅重建 `server`，只修改某个前端时仅重建对应服务；共享契约和 lockfile 变化会同时重建两个前端。
 

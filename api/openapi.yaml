@@ -71,6 +71,31 @@ paths:
                 properties:
                   user: { $ref: '#/components/schemas/User' }
                   balance: { type: integer, format: int64 }
+  /auth/password/login:
+    post:
+      operationId: loginWithPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [account, password]
+              properties:
+                account: { type: string, minLength: 1, maxLength: 64 }
+                password: { type: string, minLength: 1, maxLength: 128 }
+      responses:
+        '200':
+          description: 管理员登录成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user, balance]
+                properties:
+                  user: { $ref: '#/components/schemas/User' }
+                  balance: { type: integer, format: int64 }
   /me:
     get:
       operationId: getMe
