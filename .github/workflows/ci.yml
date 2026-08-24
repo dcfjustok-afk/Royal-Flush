@@ -3,6 +3,7 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -124,3 +125,24 @@ jobs:
           if test -f "$RUNNER_TEMP/server.pid"; then
             kill "$(cat "$RUNNER_TEMP/server.pid")" || true
           fi
+
+  deployment-gate:
+    name: Deployment gate
+    if: ${{ always() }}
+    needs: [go, node, playwright, capacity-smoke]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify required jobs
+        env:
+          GO_RESULT: ${{ needs.go.result }}
+          NODE_RESULT: ${{ needs.node.result }}
+          PLAYWRIGHT_RESULT: ${{ needs.playwright.result }}
+          CAPACITY_RESULT: ${{ needs['capacity-smoke'].result }}
+        run: |
+          for result in "$GO_RESULT" "$NODE_RESULT" "$PLAYWRIGHT_RESULT" "$CAPACITY_RESULT"; do
+            if test "$result" != "success"; then
+              echo "A required CI job did not succeed: $result"
+              exit 1
+            fi
+          done
+          echo "All required CI jobs succeeded; this revision is ready for deployment."
