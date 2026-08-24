@@ -56,6 +56,32 @@ func (s *Server) verifyOTP(writer http.ResponseWriter, request *http.Request) {
 	writeJSON(writer, http.StatusOK, map[string]any{"user": user, "balance": s.scores.Balance(user.ID)})
 }
 
+func (s *Server) passwordLogin(writer http.ResponseWriter, request *http.Request) {
+	var input struct {
+		Account  string `json:"account"`
+		Password string `json:"password"`
+	}
+	if err := decodeJSON(request, &input); err != nil {
+		writeProblem(writer, http.StatusBadRequest, "invalid_json", "请求格式不正确")
+		return
+	}
+	user, token, err := s.auth.PasswordLogin(input.Account, input.Password, s.config.AdminAccount, s.config.AdminPassword)
+	if err != nil {
+		writeDomainError(writer, err)
+		return
+	}
+	if err := s.ops.UpsertUser(request.Context(), operations.UserIdentity{ID: user.ID, Phone: user.Phone, Nickname: user.Nickname, CreatedAt: user.CreatedAt}); err != nil {
+		writeProblem(writer, http.StatusServiceUnavailable, "identity_store_unavailable", "用户资料暂时无法保存")
+		return
+	}
+	s.scores.EnsureUser(user.ID)
+	http.SetCookie(writer, &http.Cookie{
+		Name: "rf_session", Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode,
+		Secure: !s.config.Development, MaxAge: int((30 * 24 * time.Hour).Seconds()),
+	})
+	writeJSON(writer, http.StatusOK, map[string]any{"user": user, "balance": s.scores.Balance(user.ID)})
+}
+
 func (s *Server) me(writer http.ResponseWriter, request *http.Request) {
 	user := currentUser(request)
 	writeJSON(writer, http.StatusOK, map[string]any{"user": user, "balance": s.scores.Balance(user.ID), "activeRoomId": s.rooms.ActiveRoom(user.ID)})

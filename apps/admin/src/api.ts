@@ -115,13 +115,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const adminApi = {
-  requestOtp: (phone: string) => request<{ expiresAt: string; expiresIn: number; devCode?: string }>("/auth/otp/request", {
+  login: (account: string, password: string) => request<{ user: SessionUser; balance: number }>("/auth/password/login", {
     method: "POST",
-    body: JSON.stringify({ phone }),
-  }),
-  verifyOtp: (phone: string, code: string, nickname: string) => request<{ user: SessionUser; balance: number }>("/auth/otp/verify", {
-    method: "POST",
-    body: JSON.stringify({ phone, code, nickname }),
+    body: JSON.stringify({ account, password }),
   }),
   me: () => request<{ user: SessionUser; balance: number; activeRoomId?: string }>("/me"),
   epochs: () => request<{ epochs: Array<{ id: number; reason: string; administrator: string; createdAt: string }> }>("/admin/score-epochs"),

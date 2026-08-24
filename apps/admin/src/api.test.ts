@@ -7,6 +7,21 @@ describe("admin score API", () => {
     vi.unstubAllGlobals();
   });
 
+  it("submits administrator account credentials without an OTP request", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ user: { id: "admin-1" }, balance: 1000 }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(adminApi.login("19970606473", "123456")).resolves.toMatchObject({ balance: 1000 });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/v1/auth/password/login");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual({ account: "19970606473", password: "123456" });
+  });
+
   it("sends an auditable reset request with development credentials", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ epoch: 5, baseScore: 1000, duplicate: false }), {
       status: 200,
@@ -49,7 +64,7 @@ describe("admin score API", () => {
   it("preserves authentication error status and code", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
       code: "authentication_required",
-      message: "请先完成手机号验证码登录",
+      message: "请先完成管理员账号密码登录",
     }), { status: 401, headers: { "Content-Type": "application/json" } })));
 
     const error = await adminApi.me().catch((reason: unknown) => reason);
@@ -57,7 +72,7 @@ describe("admin score API", () => {
     expect(error).toMatchObject({
       status: 401,
       code: "authentication_required",
-      message: "请先完成手机号验证码登录",
+      message: "请先完成管理员账号密码登录",
     });
   });
 });

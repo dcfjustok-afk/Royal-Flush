@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import {
   Activity, AlertTriangle, Ban, CheckCircle2, CircleUserRound, Clock3,
-  DoorOpen, FileClock, Gauge, Inbox, LoaderCircle, Radio, RefreshCw, RotateCcw,
-  Search, Send, ShieldAlert, ShieldCheck, Smartphone, Unlock, Users, WifiOff, X, XCircle,
+  DoorOpen, FileClock, Gauge, Inbox, KeyRound, LoaderCircle, RefreshCw, RotateCcw,
+  Search, Send, ShieldAlert, ShieldCheck, Unlock, Users, WifiOff, X, XCircle,
 } from "@lucide/vue";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
@@ -14,38 +14,20 @@ type Section = "overview" | "users" | "rooms" | "reports" | "audit";
 
 const now = new Date();
 const activeSection = ref<Section>("overview");
-const authState = ref<"checking" | "anonymous" | "authorized" | "forbidden">(apiMode ? "checking" : "authorized");
-const operator = ref<SessionUser | null>(apiMode ? null : { id: "local-admin", phone: "", nickname: "local-admin", permissions: { "admin:read": true } });
-const loginPhone = ref("");
-const loginCode = ref("");
-const loginNickname = ref("");
-const otpRequested = ref(false);
-const devCode = ref("");
+const authState = ref<"checking" | "anonymous" | "authorized" | "forbidden">("checking");
+const operator = ref<SessionUser | null>(null);
+const loginAccount = ref("");
+const loginPassword = ref("");
 const authBusy = ref(false);
 const authError = ref("");
 const search = ref("");
 const loading = ref(false);
 const loadErrors = ref<string[]>([]);
-const epoch = ref(4);
-const rooms = ref<AdminRoom[]>([
-  { id: "room-demo-2806", code: "RF-2806", name: "周六夜场", ownerId: "u1", ownerName: "岱奇", players: 6, onlinePlayers: 6, maxPlayers: 8, blindPreset: "5/10", handNumber: 28, voiceEnabled: true, status: "playing", version: 94, createdAt: now.toISOString() },
-  { id: "room-demo-9132", code: "RF-9132", name: "慢速夜场", ownerId: "u2", ownerName: "阿桥", players: 4, onlinePlayers: 3, maxPlayers: 6, blindPreset: "2/5", handNumber: 11, voiceEnabled: true, status: "playing", version: 47, createdAt: now.toISOString() },
-  { id: "room-demo-0475", code: "RF-0475", name: "练习桌", ownerId: "u3", ownerName: "小北", players: 2, onlinePlayers: 2, maxPlayers: 8, blindPreset: "10/20", handNumber: 0, voiceEnabled: false, status: "waiting", version: 8, createdAt: now.toISOString() },
-]);
-const users = ref<OperationsUser[]>([
-  { id: "u1", nickname: "岱奇", phone: "13800132806", balance: 1860, activeRoomId: "room-demo-2806", banned: false, createdAt: now.toISOString(), updatedAt: now.toISOString() },
-  { id: "u2", nickname: "阿桥", phone: "13900131408", balance: 3680, activeRoomId: "room-demo-2806", banned: false, createdAt: now.toISOString(), updatedAt: now.toISOString() },
-  { id: "u3", nickname: "远山", phone: "18600139021", balance: -240, activeRoomId: "room-demo-9132", banned: false, createdAt: now.toISOString(), updatedAt: now.toISOString() },
-  { id: "u4", nickname: "林度", phone: "13700136110", balance: 610, banned: true, createdAt: now.toISOString(), updatedAt: now.toISOString() },
-]);
-const reports = ref<Report[]>([
-  { id: "report-demo-1", reporterId: "u3", roomId: "room-demo-9132", subjectUserId: "u2", category: "conduct", detail: "连续多轮在最后一秒行动，影响牌局节奏。", status: "open", createdAt: now.toISOString() },
-  { id: "report-demo-2", reporterId: "u1", roomId: "room-demo-2806", category: "voice", detail: "语音中持续出现杂音。", status: "open", createdAt: now.toISOString() },
-]);
-const audits = ref<AdminAudit[]>([
-  { id: "audit-demo-1", administratorId: "ops.li", action: "score.reset_all", targetType: "score_epoch", targetId: "4", reason: "季度演练", requestId: "demo-1", metadata: {}, createdAt: "2026-08-20T10:34:00+08:00" },
-  { id: "audit-demo-2", administratorId: "ops.chen", action: "user.unban", targetType: "user", targetId: "u4", reason: "复核完成", requestId: "demo-2", metadata: {}, createdAt: "2026-08-18T17:20:00+08:00" },
-]);
+const epoch = ref<number | null>(null);
+const rooms = ref<AdminRoom[]>([]);
+const users = ref<OperationsUser[]>([]);
+const reports = ref<Report[]>([]);
+const audits = ref<AdminAudit[]>([]);
 
 const resetOpen = ref(false);
 const resetReason = ref("");
@@ -77,8 +59,7 @@ const filteredUsers = computed(() => {
 const openReports = computed(() => reports.value.filter((report) => report.status === "open" || report.status === "reviewing"));
 const playingRooms = computed(() => rooms.value.filter((room) => room.status === "playing").length);
 const onlinePlayers = computed(() => rooms.value.reduce((total, room) => total + room.onlinePlayers, 0));
-const phoneValid = computed(() => /^1[3-9]\d{9}$/.test(loginPhone.value));
-const codeValid = computed(() => /^\d{6}$/.test(loginCode.value));
+const credentialsValid = computed(() => loginAccount.value.trim().length > 0 && loginPassword.value.length > 0);
 
 function errorMessage(reason: unknown, fallback: string) {
   return reason instanceof Error ? reason.message : fallback;
@@ -112,7 +93,11 @@ function acceptOperator(user: SessionUser) {
 }
 
 async function initialize() {
-  if (!apiMode) return;
+  if (!apiMode) {
+    authState.value = "anonymous";
+    authError.value = "运营服务未配置，无法读取真实数据";
+    return;
+  }
   authState.value = "checking";
   authError.value = "";
   try {
@@ -126,43 +111,25 @@ async function initialize() {
   }
 }
 
-async function requestAdminOtp() {
-  if (!phoneValid.value || authBusy.value) return;
+async function loginAdmin() {
+  if (!credentialsValid.value || authBusy.value) return;
   authBusy.value = true;
   authError.value = "";
   try {
-    const challenge = await adminApi.requestOtp(loginPhone.value);
-    otpRequested.value = true;
-    devCode.value = challenge.devCode ?? "";
-  } catch (reason) {
-    authError.value = errorMessage(reason, "验证码发送失败，请稍后重试");
-  } finally {
-    authBusy.value = false;
-  }
-}
-
-async function verifyAdminOtp() {
-  if (!phoneValid.value || !codeValid.value || authBusy.value) return;
-  authBusy.value = true;
-  authError.value = "";
-  try {
-    await adminApi.verifyOtp(loginPhone.value, loginCode.value, loginNickname.value.trim());
+    await adminApi.login(loginAccount.value.trim(), loginPassword.value);
     if (acceptOperator((await adminApi.me()).user)) await loadAll();
   } catch (reason) {
-    authError.value = errorMessage(reason, "登录失败，请检查验证码后重试");
+    authError.value = errorMessage(reason, "登录失败，请检查账号或密码后重试");
   } finally {
     authBusy.value = false;
   }
 }
 
-function useAnotherPhone() {
+function useAnotherAccount() {
   authState.value = "anonymous";
   operator.value = null;
-  loginPhone.value = "";
-  loginCode.value = "";
-  loginNickname.value = "";
-  otpRequested.value = false;
-  devCode.value = "";
+  loginAccount.value = "";
+  loginPassword.value = "";
   authError.value = "";
 }
 
@@ -188,8 +155,9 @@ async function performReset() {
   resetError.value = "";
   try {
     const previousEpoch = epoch.value;
-    epoch.value = apiMode ? (await adminApi.resetScores(resetReason.value.trim())).epoch : epoch.value + 1;
-    audits.value.unshift({ id: crypto.randomUUID(), administratorId: "local-admin", action: "score.reset_all", targetType: "score_epoch", targetId: String(epoch.value), reason: resetReason.value.trim(), requestId: crypto.randomUUID(), metadata: { previousEpoch }, createdAt: new Date().toISOString() });
+    if (!apiMode) throw new Error("运营服务未配置");
+    epoch.value = (await adminApi.resetScores(resetReason.value.trim())).epoch;
+    audits.value.unshift({ id: crypto.randomUUID(), administratorId: operator.value?.id ?? "unknown", action: "score.reset_all", targetType: "score_epoch", targetId: String(epoch.value), reason: resetReason.value.trim(), requestId: crypto.randomUUID(), metadata: { previousEpoch }, createdAt: new Date().toISOString() });
     resetDone.value = true;
     resetTimer = window.setTimeout(closeReset, 1400);
   } catch (reason) {
@@ -219,9 +187,8 @@ async function applyModeration() {
   moderationBusy.value = true;
   moderationError.value = "";
   try {
-    const updated = apiMode
-      ? (await adminApi.setUserBanned(target.id, !target.banned, moderationReason.value.trim())).user
-      : { ...target, banned: !target.banned, updatedAt: new Date().toISOString() };
+    if (!apiMode) throw new Error("运营服务未配置，无法修改用户状态");
+    const updated = (await adminApi.setUserBanned(target.id, !target.banned, moderationReason.value.trim())).user;
     users.value = users.value.map((user) => user.id === updated.id ? updated : user);
     moderationTarget.value = null;
   } catch (reason) {
@@ -244,9 +211,8 @@ async function handleReport() {
   reportBusy.value = true;
   reportError.value = "";
   try {
-    const updated = apiMode
-      ? (await adminApi.resolveReport(target.id, reportDecision.value, reportReason.value.trim())).report
-      : { ...target, status: reportDecision.value, handledBy: "local-admin", handledAt: new Date().toISOString() };
+    if (!apiMode) throw new Error("运营服务未配置，无法处理举报");
+    const updated = (await adminApi.resolveReport(target.id, reportDecision.value, reportReason.value.trim())).report;
     reports.value = reports.value.map((report) => report.id === updated.id ? updated : report);
     reportTarget.value = null;
   } catch (reason) {
@@ -261,12 +227,8 @@ async function inspectRoom(room: AdminRoom) {
   roomDetailError.value = "";
   roomDetailBusy.value = true;
   try {
-    roomDetail.value = apiMode ? await adminApi.room(room.id) : {
-      roomId: room.id, roomCode: room.code, roomName: room.name, ownerId: room.ownerId, version: room.version,
-      handNumber: room.handNumber, street: room.status === "playing" ? "flop" : "waiting", pot: 145,
-      players: users.value.slice(0, room.players).map((user, index) => ({ id: user.id, name: user.nickname, seat: index, tablePoints: 1000, accountPoints: user.balance, status: "active", isReady: true, isMuted: false })),
-      config: { blindPreset: room.blindPreset, actionSeconds: 30, voiceEnabled: room.voiceEnabled, chipDenominations: [5, 10, 20, 50, 100] }, messages: [],
-    };
+    if (!apiMode) throw new Error("运营服务未配置，无法读取房间详情");
+    roomDetail.value = await adminApi.room(room.id);
   } catch (reason) {
     roomDetailError.value = errorMessage(reason, "房间详情加载失败");
   } finally {
@@ -319,19 +281,14 @@ onBeforeUnmount(() => {
     <header class="admin-auth-header"><a class="admin-brand" href="/"><span>RF</span><strong>Royal Flush<small>运营控制台</small></strong></a><span>仅限授权运营人员</span></header>
     <main class="admin-auth-main">
       <section v-if="authState === 'checking'" class="auth-state" aria-live="polite"><LoaderCircle class="spin" /><h1>正在验证运营身份</h1><p>正在读取当前会话与权限。</p></section>
-      <section v-else-if="authState === 'forbidden'" class="auth-state forbidden" role="alert"><ShieldAlert /><h1>当前账号没有运营权限</h1><p>{{ operator ? maskPhone(operator.phone) : '该账号' }} 已完成登录，但不在授权运营名单中。</p><button class="tool-button" type="button" @click="useAnotherPhone"><Smartphone />使用其他手机号</button></section>
-      <form v-else class="admin-login" @submit.prevent="otpRequested ? verifyAdminOtp() : requestAdminOtp()">
-        <div class="auth-title"><ShieldCheck /><div><h1>运营身份验证</h1><p>使用已授权的手机号进入控制台。</p></div></div>
-        <label>手机号<input v-model.trim="loginPhone" inputmode="numeric" autocomplete="tel" maxlength="11" placeholder="请输入 11 位手机号" :disabled="authBusy" /></label>
-        <template v-if="otpRequested">
-          <label>验证码<input v-model.trim="loginCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 位验证码" :disabled="authBusy" /></label>
-          <label>运营昵称 <small>选填</small><input v-model.trim="loginNickname" autocomplete="nickname" maxlength="20" placeholder="用于审计记录" :disabled="authBusy" /></label>
-          <p v-if="devCode" class="dev-code"><Radio />预览环境验证码 <strong>{{ devCode }}</strong></p>
-        </template>
+      <section v-else-if="authState === 'forbidden'" class="auth-state forbidden" role="alert"><ShieldAlert /><h1>当前账号没有运营权限</h1><p>{{ operator ? maskPhone(operator.phone) : '该账号' }} 已完成登录，但不在授权运营名单中。</p><button class="tool-button" type="button" @click="useAnotherAccount"><KeyRound />更换管理员账号</button></section>
+      <form v-else class="admin-login" @submit.prevent="loginAdmin">
+        <div class="auth-title"><ShieldCheck /><div><h1>运营身份验证</h1><p>使用平台管理员账号和密码进入控制台。</p></div></div>
+        <label>管理员账号<input v-model.trim="loginAccount" inputmode="numeric" autocomplete="username" placeholder="请输入管理员账号" :disabled="authBusy" /></label>
+        <label>管理员密码<input v-model="loginPassword" type="password" autocomplete="current-password" placeholder="请输入管理员密码" :disabled="authBusy" /></label>
         <p v-if="authError" class="auth-error" role="alert">{{ authError }}</p>
         <footer>
-          <button v-if="otpRequested" class="tool-button" type="button" :disabled="authBusy" @click="otpRequested = false; loginCode = ''; devCode = ''; authError = ''">修改手机号</button>
-          <button class="auth-submit" type="submit" :disabled="authBusy || !phoneValid || (otpRequested && !codeValid)"><LoaderCircle v-if="authBusy" class="spin" /><Send v-else />{{ authBusy ? '请稍候' : otpRequested ? '验证并进入' : '获取验证码' }}</button>
+          <button class="auth-submit" type="submit" :disabled="authBusy || !credentialsValid"><LoaderCircle v-if="authBusy" class="spin" /><Send v-else />{{ authBusy ? '请稍候' : '登录运营台' }}</button>
         </footer>
       </form>
     </main>
@@ -354,7 +311,7 @@ onBeforeUnmount(() => {
     <main class="admin-main">
       <header class="admin-topbar">
         <div><h1>{{ { overview: '运行概览', users: '用户与积分', rooms: '活跃房间', reports: '举报处理', audit: '审计记录' }[activeSection] }}</h1><span>{{ new Intl.DateTimeFormat('zh-CN', { dateStyle: 'long', timeZone: 'Asia/Shanghai' }).format(now) }} · Asia/Shanghai</span></div>
-        <div class="operator"><span class="service-live">{{ apiMode ? '实时接口' : '演示数据' }}</span><div class="operator-identity"><CircleUserRound /><span><strong>{{ operator?.nickname ?? '运营员' }}</strong><small>{{ operator?.phone ? maskPhone(operator.phone) : 'local-admin' }}</small></span></div></div>
+        <div class="operator"><span class="service-live">{{ apiMode ? '实时接口' : '服务未配置' }}</span><div class="operator-identity"><CircleUserRound /><span><strong>{{ operator?.nickname ?? '运营员' }}</strong><small>{{ operator?.phone ? maskPhone(operator.phone) : '--' }}</small></span></div></div>
       </header>
 
       <div v-if="loadErrors.length" class="error-band" role="alert"><WifiOff /><span><strong>部分数据未更新</strong>{{ loadErrors.join('；') }}</span><button class="tool-button" type="button" @click="loadAll"><RefreshCw />重试</button></div>
@@ -372,7 +329,7 @@ onBeforeUnmount(() => {
             <div class="admin-table"><div class="admin-row head"><span>房间</span><span>房主</span><span>人数</span><span>盲注</span><span>手牌</span><span>语音</span><span>状态</span></div><button v-for="room in rooms.slice(0, 8)" :key="room.id" class="admin-row row-button" type="button" @click="inspectRoom(room)"><span><strong>{{ room.name }}</strong><small>{{ room.code }}</small></span><span>{{ room.ownerName }}</span><span>{{ room.onlinePlayers }} / {{ room.maxPlayers }}</span><span>{{ room.blindPreset }}</span><span># {{ String(room.handNumber).padStart(3, '0') }}</span><span>{{ room.voiceEnabled ? '已启用' : '已关闭' }}</span><span><i :class="{ waiting: room.status === 'waiting' }" />{{ statusLabel(room.status) }}</span></button><div v-if="!rooms.length" class="table-empty"><Inbox />当前没有活跃房间</div></div>
           </div>
           <aside class="operations-side">
-            <section class="score-epoch"><header><h2>积分周期</h2><RotateCcw /></header><span>当前 Epoch</span><strong>{{ epoch }}</strong><p>全站基线 1,000，活跃牌局结束后照常结算净输赢。</p><button class="danger-button" type="button" @click="resetOpen = true"><RotateCcw />重置全站积分</button></section>
+            <section class="score-epoch"><header><h2>积分周期</h2><RotateCcw /></header><span>当前 Epoch</span><strong>{{ epoch ?? '--' }}</strong><p>全站基线 1,000，活跃牌局结束后照常结算净输赢。</p><button class="danger-button" type="button" @click="resetOpen = true"><RotateCcw />重置全站积分</button></section>
             <section class="system-feed"><header><h2>最近审计</h2><Clock3 /></header><ol><li v-for="audit in audits.slice(0, 4)" :key="audit.id"><time>{{ formatTime(audit.createdAt).split(' ').at(-1) }}</time><span>{{ auditAction(audit.action) }} · {{ audit.reason }}</span></li><li v-if="!audits.length"><span>暂无管理员操作</span></li></ol></section>
           </aside>
         </section>

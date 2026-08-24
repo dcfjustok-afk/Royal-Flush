@@ -16,6 +16,7 @@ import (
 var (
 	ErrInvalidPhone = errors.New("请输入有效的中国大陆手机号")
 	ErrInvalidCode  = errors.New("验证码无效或已过期")
+	ErrInvalidCredentials = errors.New("账号或密码错误")
 )
 
 var mainlandPhone = regexp.MustCompile(`^1[3-9][0-9]{9}$`)
@@ -102,6 +103,36 @@ func (s *Service) Verify(phone, code, nickname string) (User, string, error) {
 		s.usersByID[id] = user
 	} else if nickname != "" {
 		user.Nickname = nickname
+	}
+	token, err := idgen.ID("session")
+	if err != nil {
+		return User{}, "", err
+	}
+	s.sessions[token] = user.ID
+	return cloneUser(user), token, nil
+}
+
+func (s *Service) PasswordLogin(account, password, configuredAccount, configuredPassword string) (User, string, error) {
+	if configuredAccount == "" || configuredPassword == "" || subtle.ConstantTimeCompare([]byte(account), []byte(configuredAccount)) != 1 || subtle.ConstantTimeCompare([]byte(password), []byte(configuredPassword)) != 1 {
+		return User{}, "", ErrInvalidCredentials
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	userID := "admin-" + configuredAccount
+	user := s.usersByID[userID]
+	if user == nil {
+		user = &User{
+			ID: userID, Phone: configuredAccount, Nickname: "平台管理员",
+			Permissions: map[string]bool{"score:reset-all": true, "admin:read": true, "user:ban": true, "report:manage": true},
+			CreatedAt: s.now().UTC(),
+		}
+		s.usersByID[userID] = user
+	} else {
+		user.Permissions["score:reset-all"] = true
+		user.Permissions["admin:read"] = true
+		user.Permissions["user:ban"] = true
+		user.Permissions["report:manage"] = true
 	}
 	token, err := idgen.ID("session")
 	if err != nil {
