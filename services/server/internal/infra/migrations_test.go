@@ -45,4 +45,12 @@ func TestInitialMigrationContainsCriticalIntegrityConstraints(t *testing.T) {
 	if !strings.Contains(string(eventMigration), "room_events_room_version") {
 		t.Fatal("room event sequence migration is missing its version index")
 	}
+	statePath := filepath.Join(filepath.Dir(source), "..", "..", "migrations", "005_room_states.sql")
+	stateMigration, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(stateMigration), "CREATE TABLE room_states") {
+		t.Fatal("room state migration is missing the snapshot table")
+	}
 }

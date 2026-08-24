@@ -88,6 +88,13 @@ func main() {
 	}
 	application := httpapi.New(applicationConfig, logger)
 	defer application.Close()
+	restoreContext, cancelRestore := context.WithTimeout(context.Background(), 20*time.Second)
+	if err := application.Restore(restoreContext); err != nil {
+		cancelRestore()
+		logger.Error("room restoration failed", "error", err)
+		os.Exit(1)
+	}
+	cancelRestore()
 	httpServer := &http.Server{
 		Addr: ":" + port, Handler: application.Handler(), ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second,

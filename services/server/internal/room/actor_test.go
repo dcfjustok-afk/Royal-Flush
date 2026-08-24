@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/royal-flush/royal-flush/services/server/internal/chips"
+	"github.com/royal-flush/royal-flush/services/server/internal/poker"
 	"github.com/royal-flush/royal-flush/services/server/internal/score"
 )
 
@@ -334,6 +335,50 @@ func TestManagerPersistsOwnerSeatJoinedSeatsAndCommands(t *testing.T) {
 	}
 }
 
+func TestManagerRestoresAnActiveHandAndPrivateCards(t *testing.T) {
+	ctx := context.Background()
+	store := &statefulRoomStore{states: make(map[string]PersistentState)}
+	manager := NewManagerWithStore(score.NewService(nil), store)
+	actor, err := manager.Create(ctx, testConfig(), Identity{ID: "owner", Name: "房主"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Join(ctx, actor.ID, Identity{ID: "u2", Name: "玩家二"}, 2); err != nil {
+		t.Fatal(err)
+	}
+	ready := json.RawMessage(`{"ready":true}`)
+	if _, _, err := actor.Handle(ctx, "owner", ClientCommand{Type: "room.ready", RequestID: "ready-owner", Payload: ready}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := actor.Handle(ctx, "u2", ClientCommand{Type: "room.ready", RequestID: "ready-u2", Payload: ready}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := actor.Handle(ctx, "owner", ClientCommand{Type: "game.start", RequestID: "start-before-restart"}); err != nil {
+		t.Fatal(err)
+	}
+	manager.Close()
+
+	restoredManager := NewManagerWithStore(score.NewService(nil), store)
+	t.Cleanup(restoredManager.Close)
+	if err := restoredManager.Restore(ctx); err != nil {
+		t.Fatal(err)
+	}
+	restoredActor, ok := restoredManager.Room(actor.ID)
+	if !ok {
+		t.Fatal("active room was not restored")
+	}
+	snapshot, err := restoredActor.Snapshot(ctx, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Street != poker.StreetPreflop || len(snapshot.HoleCards) != 2 {
+		t.Fatalf("active hand or private cards were not restored: %#v", snapshot)
+	}
+	if playerStatus(snapshot, "owner") != "disconnected" || playerStatus(snapshot, "u2") != "disconnected" {
+		t.Fatalf("restored players did not enter disconnect retention: %#v", snapshot.Players)
+	}
+}
+
 type recordingLease struct {
 	mu       sync.Mutex
 	acquire  bool
@@ -346,6 +391,26 @@ type recordingRoomStore struct {
 	createdOwner roomSeatCopy
 	openedSeats  []roomSeatCopy
 	events       []Envelope
+}
+
+type statefulRoomStore struct {
+	recordingRoomStore
+	states map[string]PersistentState
+}
+
+func (s *statefulRoomStore) SaveRoomState(_ context.Context, state PersistentState) error {
+	s.states[state.Room.ID] = state
+	return nil
+}
+
+func (s *statefulRoomStore) LoadRoomStates(context.Context) ([]PersistentState, error) {
+	states := make([]PersistentState, 0, len(s.states))
+	for _, state := range s.states {
+		if !state.Ended {
+			states = append(states, state)
+		}
+	}
+	return states, nil
 }
 
 type roomSeatCopy = SeatRecord

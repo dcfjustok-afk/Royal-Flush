@@ -83,6 +83,27 @@ func (m *Manager) Create(ctx context.Context, config Config, owner Identity) (*A
 			return nil, err
 		}
 	}
+	m.configureActor(actor)
+	if stateStore, ok := m.store.(StateStore); ok {
+		state, err := actor.PersistentState(ctx)
+		if err == nil {
+			err = stateStore.SaveRoomState(ctx, state)
+		}
+		if err != nil {
+			_ = m.store.EndRoom(context.Background(), actor.ID, time.Now().UTC())
+			m.releaseLease(actor.ID)
+			actor.Close()
+			return nil, err
+		}
+	}
+	m.rooms[actor.ID] = actor
+	m.byCode[actor.Code] = actor
+	m.activeSeat[owner.ID] = actor.ID
+	m.startLeaseRenewal(actor)
+	return actor, nil
+}
+
+func (m *Manager) configureActor(actor *Actor) {
 	actor.onCodeChanged = func(oldCode, newCode string) error { return m.updateRoomCode(actor, oldCode, newCode) }
 	actor.onOwnerChanged = func(ownerID string) error {
 		if m.store == nil {
@@ -108,17 +129,77 @@ func (m *Manager) Create(ctx context.Context, config Config, owner Identity) (*A
 		}
 		return m.store.AddSeatAllocation(context.Background(), seatSessionID, amount)
 	}
-	actor.onEvent = func(actorUserID string, event Envelope) error {
+	actor.onEvent = func(actorUserID string, event Envelope, state PersistentState) error {
 		if m.store == nil {
 			return nil
 		}
-		return m.store.AppendRoomEvent(context.Background(), actorUserID, event)
+		if atomicStore, ok := m.store.(AtomicStateStore); ok {
+			return atomicStore.AppendRoomEventAndState(context.Background(), actorUserID, event, state)
+		}
+		if err := m.store.AppendRoomEvent(context.Background(), actorUserID, event); err != nil {
+			return err
+		}
+		if stateStore, ok := m.store.(StateStore); ok {
+			return stateStore.SaveRoomState(context.Background(), state)
+		}
+		return nil
 	}
-	m.rooms[actor.ID] = actor
-	m.byCode[actor.Code] = actor
-	m.activeSeat[owner.ID] = actor.ID
-	m.startLeaseRenewal(actor)
-	return actor, nil
+}
+
+func (m *Manager) Restore(ctx context.Context) error {
+	stateStore, ok := m.store.(StateStore)
+	if !ok {
+		return nil
+	}
+	states, err := stateStore.LoadRoomStates(ctx)
+	if err != nil {
+		return err
+	}
+	for _, state := range states {
+		actor, err := NewActorFromState(state, m.scores, m.releaseSeat)
+		if err != nil {
+			return err
+		}
+		if m.lease != nil {
+			acquired, err := m.lease.Acquire(ctx, actor.ID, m.instanceID, m.leaseTTL)
+			if err != nil {
+				actor.Close()
+				return err
+			}
+			if !acquired {
+				actor.Close()
+				continue
+			}
+		}
+		m.configureActor(actor)
+		m.mu.Lock()
+		if m.rooms[actor.ID] != nil || m.byCode[actor.Code] != nil {
+			m.mu.Unlock()
+			m.releaseLease(actor.ID)
+			actor.Close()
+			return errors.New("duplicate persisted room identity")
+		}
+		for _, player := range actor.game.Seats {
+			if player == nil {
+				continue
+			}
+			if m.activeSeat[player.UserID] != "" {
+				m.mu.Unlock()
+				m.releaseLease(actor.ID)
+				actor.Close()
+				return ErrAlreadySeated
+			}
+			m.activeSeat[player.UserID] = actor.ID
+		}
+		m.rooms[actor.ID] = actor
+		m.byCode[actor.Code] = actor
+		m.startLeaseRenewal(actor)
+		m.mu.Unlock()
+		if err := actor.ResumeAfterRestart(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (m *Manager) Join(ctx context.Context, roomID string, identity Identity, seat int) (TableSnapshot, error) {

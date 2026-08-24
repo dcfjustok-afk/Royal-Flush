@@ -157,7 +157,7 @@ type Actor struct {
 	onRoomEnded    func() error
 	onSeatOpened   func(seat SeatRecord, claimOwnership bool) error
 	onSeatRefilled func(seatSessionID string, amount int64) error
-	onEvent        func(actorUserID string, event Envelope) error
+	onEvent        func(actorUserID string, event Envelope, state PersistentState) error
 }
 
 func NewActor(config Config, owner Identity, scores AccountScores, onSeatClosed func(string)) (*Actor, error) {
@@ -196,6 +196,54 @@ func NewActor(config Config, owner Identity, scores AccountScores, onSeatClosed 
 	actor.appendMessage("system", fmt.Sprintf("%s 创建了房间", owner.Name))
 	go actor.loop()
 	return actor, nil
+}
+
+func NewActorFromState(state PersistentState, scores AccountScores, onSeatClosed func(string)) (*Actor, error) {
+	if state.Room.ID == "" || state.Room.Code == "" || state.Room.CreatedAt.IsZero() {
+		return nil, errors.New("persisted room identity is invalid")
+	}
+	if err := state.Room.Config.Validate(); err != nil {
+		return nil, err
+	}
+	game, err := poker.RestoreState(state.Game)
+	if err != nil {
+		return nil, err
+	}
+	actor := &Actor{
+		ID: state.Room.ID, Code: state.Room.Code, OwnerID: state.Room.OwnerID, CreatedAt: state.Room.CreatedAt,
+		config: cloneConfig(state.Room.Config), game: game, scores: scores,
+		identities: cloneIdentityMap(state.Identities), joinOrder: cloneInt64Map(state.JoinOrder), nextJoin: state.NextJoin,
+		muted: cloneBoolMap(state.Muted), messages: append([]SystemMessage(nil), state.Messages...), version: state.Room.Version,
+		deadline: state.Deadline, ended: state.Ended, processed: cloneEnvelopeMap(state.Processed),
+		subscribers: make(map[chan Envelope]struct{}), connections: make(map[string]int), disconnectGen: make(map[string]int64), disconnectWait: 60 * time.Second,
+		calls: make(chan actorCall), timeouts: make(chan timeoutSignal, 8), disconnects: make(chan disconnectSignal, 8),
+		stop: make(chan struct{}), onSeatClosed: onSeatClosed,
+	}
+	go actor.loop()
+	return actor, nil
+}
+
+func (a *Actor) ResumeAfterRestart(ctx context.Context) error {
+	_, err := a.call(ctx, func() (any, error) {
+		for _, player := range a.game.Seats {
+			if player == nil || player.Leaving {
+				continue
+			}
+			player.Disconnected = true
+			a.connections[player.UserID] = 0
+			a.disconnectGen[player.UserID]++
+			a.version++
+			a.publish("room.player_disconnected", "", map[string]any{
+				"userId": player.UserID, "retainedSeconds": int(a.disconnectWait.Seconds()), "reason": "server_restart",
+			})
+			a.scheduleDisconnectTimeout(player.UserID)
+		}
+		if a.game.InHand() && a.game.Actor >= 0 {
+			a.scheduleActionTimeoutAt(a.deadline)
+		}
+		return nil, nil
+	})
+	return err
 }
 
 func (a *Actor) Close() {
@@ -304,17 +352,18 @@ func (a *Actor) Handle(ctx context.Context, userID string, command ClientCommand
 			return nil, err
 		}
 		a.version++
-		envelope := a.makeEnvelope(eventType, command.RequestID, payload)
-		if a.onEvent != nil {
-			if err := a.onEvent(userID, envelope); err != nil {
-				return nil, err
-			}
-		}
-		a.processed[key] = envelope
-		a.publishEnvelope(envelope)
 		if a.game.InHand() && a.game.Actor >= 0 {
 			a.scheduleActionTimeout()
 		}
+		envelope := a.makeEnvelope(eventType, command.RequestID, payload)
+		a.processed[key] = envelope
+		if a.onEvent != nil {
+			if err := a.onEvent(userID, envelope, a.persistentState()); err != nil {
+				delete(a.processed, key)
+				return nil, err
+			}
+		}
+		a.publishEnvelope(envelope)
 		if !a.game.InHand() {
 			a.settleLeaving()
 		}
@@ -388,13 +437,7 @@ func (a *Actor) PlayerDisconnected(ctx context.Context, userID string) error {
 		a.version++
 		a.publish("room.player_disconnected", "", map[string]any{"userId": userID, "retainedSeconds": int(a.disconnectWait.Seconds())})
 		a.disconnectGen[userID]++
-		signal := disconnectSignal{userID: userID, generation: a.disconnectGen[userID]}
-		time.AfterFunc(a.disconnectWait, func() {
-			select {
-			case a.disconnects <- signal:
-			case <-a.stop:
-			}
-		})
+		a.scheduleDisconnectTimeout(userID)
 		return nil, nil
 	})
 	return err
@@ -705,11 +748,32 @@ func (a *Actor) call(ctx context.Context, fn func() (any, error)) (any, error) {
 }
 
 func (a *Actor) scheduleActionTimeout() {
-	a.deadline = time.Now().UTC().Add(time.Duration(a.config.ActionSeconds) * time.Second)
+	a.scheduleActionTimeoutAt(time.Now().UTC().Add(time.Duration(a.config.ActionSeconds) * time.Second))
+}
+
+func (a *Actor) scheduleActionTimeoutAt(deadline time.Time) {
+	if deadline.IsZero() {
+		deadline = time.Now().UTC()
+	}
+	a.deadline = deadline
 	signal := timeoutSignal{version: a.version, seat: a.game.Actor}
-	time.AfterFunc(time.Duration(a.config.ActionSeconds)*time.Second, func() {
+	delay := time.Until(deadline)
+	if delay < 0 {
+		delay = 0
+	}
+	time.AfterFunc(delay, func() {
 		select {
 		case a.timeouts <- signal:
+		case <-a.stop:
+		}
+	})
+}
+
+func (a *Actor) scheduleDisconnectTimeout(userID string) {
+	signal := disconnectSignal{userID: userID, generation: a.disconnectGen[userID]}
+	time.AfterFunc(a.disconnectWait, func() {
+		select {
+		case a.disconnects <- signal:
 		case <-a.stop:
 		}
 	})
@@ -845,9 +909,42 @@ func (a *Actor) makeEnvelope(kind, requestID string, payload any) Envelope {
 func (a *Actor) publish(kind, requestID string, payload any) {
 	envelope := a.makeEnvelope(kind, requestID, payload)
 	if a.onEvent != nil {
-		_ = a.onEvent("", envelope)
+		_ = a.onEvent("", envelope, a.persistentState())
 	}
 	a.publishEnvelope(envelope)
+}
+
+func (a *Actor) PersistentState(ctx context.Context) (PersistentState, error) {
+	value, err := a.call(ctx, func() (any, error) { return a.persistentState(), nil })
+	if err != nil {
+		return PersistentState{}, err
+	}
+	return value.(PersistentState), nil
+}
+
+func (a *Actor) persistentState() PersistentState {
+	identities := make(map[string]Identity, len(a.identities))
+	for key, value := range a.identities {
+		identities[key] = value
+	}
+	joinOrder := make(map[string]int64, len(a.joinOrder))
+	for key, value := range a.joinOrder {
+		joinOrder[key] = value
+	}
+	muted := make(map[string]bool, len(a.muted))
+	for key, value := range a.muted {
+		muted[key] = value
+	}
+	processed := make(map[string]Envelope, len(a.processed))
+	for key, value := range a.processed {
+		processed[key] = value
+	}
+	return PersistentState{
+		Room: Record{ID: a.ID, Code: a.Code, OwnerID: a.OwnerID, Config: cloneConfig(a.config), Version: a.version, CreatedAt: a.CreatedAt},
+		Game: a.game.ExportState(), Identities: identities, JoinOrder: joinOrder, NextJoin: a.nextJoin,
+		Muted: muted, Messages: append([]SystemMessage(nil), a.messages...), Processed: processed,
+		Deadline: a.deadline, Ended: a.ended,
+	}
 }
 
 func (a *Actor) publishEnvelope(envelope Envelope) {
@@ -871,4 +968,36 @@ func firstRune(value string) string {
 	}
 	runeValue, _ := utf8.DecodeRuneInString(value)
 	return string(runeValue)
+}
+
+func cloneIdentityMap(source map[string]Identity) map[string]Identity {
+	result := make(map[string]Identity, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
+}
+
+func cloneInt64Map(source map[string]int64) map[string]int64 {
+	result := make(map[string]int64, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
+}
+
+func cloneBoolMap(source map[string]bool) map[string]bool {
+	result := make(map[string]bool, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
+}
+
+func cloneEnvelopeMap(source map[string]Envelope) map[string]Envelope {
+	result := make(map[string]Envelope, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
 }

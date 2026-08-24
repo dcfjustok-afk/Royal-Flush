@@ -62,6 +62,10 @@ func (s *Server) Close() {
 	s.rooms.Close()
 }
 
+func (s *Server) Restore(ctx context.Context) error {
+	return s.rooms.Restore(ctx)
+}
+
 func (s *Server) routes() http.Handler {
 	router := chi.NewRouter()
 	router.Use(middleware.RequestID)
