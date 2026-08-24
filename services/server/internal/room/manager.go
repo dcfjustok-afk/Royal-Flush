@@ -155,6 +155,9 @@ func (m *Manager) configureActor(actor *Actor) {
 		if m.store == nil {
 			return nil
 		}
+		if _, ok := m.store.(AtomicStateStore); ok {
+			return nil
+		}
 		return m.store.AddSeatAllocation(context.Background(), seatSessionID, amount)
 	}
 	actor.onEvent = func(actorUserID string, event Envelope, state PersistentState) error {

@@ -597,8 +597,9 @@ type recordingRoomStore struct {
 
 type statefulRoomStore struct {
 	recordingRoomStore
-	states  map[string]PersistentState
-	saveErr error
+	states      map[string]PersistentState
+	allocations map[string]int64
+	saveErr     error
 }
 
 func (s *statefulRoomStore) SaveRoomState(_ context.Context, state PersistentState) error {
@@ -617,6 +618,27 @@ func (s *statefulRoomStore) LoadRoomStates(context.Context) ([]PersistentState, 
 		}
 	}
 	return states, nil
+}
+
+func (s *statefulRoomStore) AppendRoomEventAndState(ctx context.Context, actorUserID string, event Envelope, state PersistentState) error {
+	if s.saveErr != nil {
+		return s.saveErr
+	}
+	if event.Type == "room.table_points_refilled" {
+		for _, player := range state.Game.Seats {
+			if player != nil && player.UserID == actorUserID {
+				if s.allocations == nil {
+					s.allocations = make(map[string]int64)
+				}
+				s.allocations[player.SeatSessionID] = player.Allocated
+				break
+			}
+		}
+	}
+	if err := s.AppendRoomEvent(ctx, actorUserID, event); err != nil {
+		return err
+	}
+	return s.SaveRoomState(ctx, state)
 }
 
 func (s *statefulRoomStore) OpenSeatAndAppendRoomEventAndState(ctx context.Context, seat SeatRecord, claimOwnership bool, actorUserID string, event Envelope, state PersistentState) error {
@@ -867,6 +889,45 @@ func TestSettlementFailureKeepsSeatAndAllowsSameRequestRetry(t *testing.T) {
 	}
 	if scores.applicationCount() != 1 {
 		t.Fatalf("settlement applied %d times, want exactly once", scores.applicationCount())
+	}
+}
+
+func TestRefillPersistenceFailureDoesNotDoubleSeatAllocation(t *testing.T) {
+	ctx := context.Background()
+	store := &statefulRoomStore{states: make(map[string]PersistentState), allocations: make(map[string]int64)}
+	manager := NewManagerWithStore(score.NewService(nil), store)
+	actor, err := manager.Create(ctx, testConfig(), Identity{ID: "owner", Name: "房主"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(manager.Close)
+	var seatSessionID string
+	if _, err := actor.call(ctx, func() (any, error) {
+		player := actor.game.Seats[0]
+		player.Stack = 0
+		player.Away = true
+		seatSessionID = player.SeatSessionID
+		return nil, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store.allocations[seatSessionID] = InitialTablePoints
+	store.saveErr = errors.New("database unavailable")
+	if _, _, err := actor.Handle(ctx, "owner", ClientCommand{Type: "room.refill", RequestID: "refill-retry"}); !errors.Is(err, store.saveErr) {
+		t.Fatalf("refill error = %v, want persistence failure", err)
+	}
+	snapshot, _ := actor.Snapshot(ctx, "owner")
+	if localPlayer(snapshot).TablePoints != 0 || store.allocations[seatSessionID] != InitialTablePoints {
+		t.Fatalf("failed refill changed allocation: player=%#v stored=%d", localPlayer(snapshot), store.allocations[seatSessionID])
+	}
+
+	store.saveErr = nil
+	if _, duplicate, err := actor.Handle(ctx, "owner", ClientCommand{Type: "room.refill", RequestID: "refill-retry"}); err != nil || duplicate {
+		t.Fatalf("refill retry failed: duplicate=%v err=%v", duplicate, err)
+	}
+	snapshot, _ = actor.Snapshot(ctx, "owner")
+	if localPlayer(snapshot).TablePoints != InitialTablePoints || store.allocations[seatSessionID] != 2*InitialTablePoints {
+		t.Fatalf("refill retry was not applied exactly once: player=%#v stored=%d", localPlayer(snapshot), store.allocations[seatSessionID])
 	}
 }
 

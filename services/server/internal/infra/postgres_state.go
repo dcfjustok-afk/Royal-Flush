@@ -47,15 +47,13 @@ func (p *Postgres) AppendRoomEventAndState(ctx context.Context, actorUserID stri
 		return fmt.Errorf("begin room event save: %w", err)
 	}
 	defer tx.Rollback(ctx)
-	command, err := tx.Exec(ctx, `
-		INSERT INTO room_events (room_id, version, event_type, request_id, actor_user_id, payload, created_at)
-		VALUES ($1, $2, $3, NULLIF($4, ''), NULLIF($5, ''), $6, $7)
-		ON CONFLICT DO NOTHING`, event.RoomID, event.Version, event.Type, event.RequestID, actorUserID, payload, event.SentAt)
-	if err != nil {
-		return fmt.Errorf("save room event: %w", err)
+	if err := appendRoomEventTx(ctx, tx, actorUserID, event, payload); err != nil {
+		return err
 	}
-	if command.RowsAffected() != 1 {
-		return fmt.Errorf("save room event: request already exists")
+	if event.Type == "room.table_points_refilled" {
+		if err := syncSeatAllocationTx(ctx, tx, actorUserID, state); err != nil {
+			return err
+		}
 	}
 	if err := saveRoomStateTx(ctx, tx, state, rawState); err != nil {
 		return err
@@ -64,6 +62,26 @@ func (p *Postgres) AppendRoomEventAndState(ctx context.Context, actorUserID stri
 		return fmt.Errorf("commit room event state: %w", err)
 	}
 	return nil
+}
+
+func syncSeatAllocationTx(ctx context.Context, tx pgx.Tx, actorUserID string, state room.PersistentState) error {
+	for _, player := range state.Game.Seats {
+		if player == nil || player.UserID != actorUserID {
+			continue
+		}
+		command, err := tx.Exec(ctx, `
+			UPDATE seat_sessions SET allocated_points = $1
+			WHERE id = $2 AND user_id = $3 AND room_id = $4 AND left_at IS NULL`,
+			player.Allocated, player.SeatSessionID, actorUserID, state.Room.ID)
+		if err != nil {
+			return fmt.Errorf("sync seat allocation: %w", err)
+		}
+		if command.RowsAffected() != 1 {
+			return fmt.Errorf("sync seat allocation: active seat session not found")
+		}
+		return nil
+	}
+	return fmt.Errorf("sync seat allocation: actor is not seated")
 }
 
 func (p *Postgres) OpenSeatAndAppendRoomEventAndState(ctx context.Context, seat room.SeatRecord, claimOwnership bool, actorUserID string, event room.Envelope, state room.PersistentState) error {
