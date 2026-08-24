@@ -27,7 +27,11 @@ let timer = 0;
 const broadcast = computed(() => store.connectionError ? { text: store.connectionError, at: new Date().toLocaleTimeString("zh-CN", { hour12: false }) } : store.messages[0] ?? { text: "牌局已连接", at: "--:--:--" });
 const remainingSeconds = computed(() => Math.max(0, Math.ceil((Date.parse(store.snapshot.actionDeadline) - now.value) / 1000)));
 const acting = computed(() => Boolean(store.localPlayer?.isCurrentActor));
-const speakingPlayer = computed(() => store.snapshot.players.find((player) => player.isSpeaking));
+const actionProgress = computed(() => {
+  const duration = Math.max(1, store.roomConfig.actionSeconds);
+  return Math.max(0, Math.min(1, remainingSeconds.value / duration));
+});
+const speakingPlayer = computed(() => store.voiceConnected ? store.snapshot.players.find((player) => player.isSpeaking) : undefined);
 const isOwner = computed(() => Boolean(store.localPlayer && store.snapshot.ownerId === store.localPlayer.id));
 const canAct = computed(() => acting.value && !store.commandPending && (!apiMode || store.connectionState === "connected"));
 const connectionLabel = computed(() => ({ offline: "实时连接离线", connecting: "正在连接牌桌", connected: "连接稳定", reconnecting: "正在恢复牌桌" })[store.connectionState]);
@@ -113,6 +117,7 @@ onBeforeUnmount(() => {
     <SystemBroadcast :text="broadcast.text" :at="broadcast.at" />
 
     <section class="table-stage" aria-label="德州扑克牌桌">
+      <span v-if="!apiMode" class="table-demo-marker">本地演示数据</span>
       <div class="table-telemetry"><span :class="{ unstable: store.connectionState !== 'connected' }"><Signal />{{ connectionLabel }}</span><span>手牌 <strong>{{ String(store.snapshot.handNumber).padStart(3, "0") }}</strong></span><span>盲注 <strong>{{ store.roomConfig.blindPreset }}</strong></span></div>
       <div v-if="tableError || (apiMode && store.connectionState !== 'connected')" class="table-state-banner" role="status"><WifiOff /><span>{{ tableError || connectionLabel }}</span><button type="button" :disabled="store.roomLoading" @click="retryConnection"><RefreshCw />{{ store.roomLoading ? "恢复中" : "重新连接" }}</button></div>
       <div class="poker-table-shell">
@@ -123,7 +128,7 @@ onBeforeUnmount(() => {
             <span class="street-label">{{ { preflop: '翻牌前', flop: '翻牌', turn: '转牌', river: '河牌', showdown: '摊牌', settled: '已结算', waiting: '等待开局' }[store.snapshot.street] }}</span>
           </div>
         </div>
-        <PlayerSeat v-for="seat in 8" :key="seat - 1" :seat="seat - 1" :player="playerForSeat(seat - 1)" />
+        <PlayerSeat v-for="seat in 8" :key="seat - 1" :seat="seat - 1" :player="playerForSeat(seat - 1)" :turn-progress="actionProgress" :voice-connected="store.voiceConnected" />
         <div class="local-hole-cards" aria-label="你的底牌"><PlayingCard v-for="card in store.snapshot.holeCards" :key="`${card.rank}-${card.suit}`" :card="card" compact /></div>
       </div>
     </section>

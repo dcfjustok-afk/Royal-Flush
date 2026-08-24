@@ -10,6 +10,7 @@
     "dev": "concurrently -n web,admin -c green,yellow \"npm run dev -w @royal-flush/web\" \"npm run dev -w @royal-flush/admin\"",
     "dev:web": "npm run dev -w @royal-flush/web",
     "dev:admin": "npm run dev -w @royal-flush/admin",
+    "dev:e2e-api": "node scripts/dev-e2e-web.mjs",
     "build": "npm run build -w @royal-flush/contracts && npm run build -w @royal-flush/web && npm run build -w @royal-flush/admin",
     "typecheck": "npm run typecheck -w @royal-flush/contracts && npm run typecheck -w @royal-flush/web && npm run typecheck -w @royal-flush/admin",
     "test": "npm run test -w @royal-flush/web && npm run test -w @royal-flush/admin",
