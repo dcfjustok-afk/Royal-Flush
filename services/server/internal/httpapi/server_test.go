@@ -616,6 +616,100 @@ func TestLogoutImmediatelyRevokesAllRealtimeConnections(t *testing.T) {
 	}
 }
 
+func TestRemovingPlayerRevokesRoomConnectionsButKeepsAccountSession(t *testing.T) {
+	application := New(Config{Development: false}, nil)
+	t.Cleanup(application.Close)
+	server := httptest.NewServer(application.Handler())
+	defer server.Close()
+	client := server.Client()
+	register := func(phone, nickname string) *http.Cookie {
+		response := request(t, client, http.MethodPost, server.URL+"/api/v1/auth/register", map[string]any{
+			"phone": phone, "password": "table2026", "nickname": nickname,
+		}, nil)
+		if response.StatusCode != http.StatusCreated || len(response.Cookies()) != 1 {
+			t.Fatalf("register %s status/cookie = %d/%d: %s", phone, response.StatusCode, len(response.Cookies()), readBody(response))
+		}
+		cookie := response.Cookies()[0]
+		response.Body.Close()
+		return cookie
+	}
+	ownerSession := register("13800138002", "房主")
+	playerSession := register("13800138003", "被移出玩家")
+	roomBody := map[string]any{
+		"name": "成员撤销桌", "maxPlayers": 2, "blindPreset": "5/10", "actionSeconds": 20,
+		"voiceEnabled": true, "chipDenominations": []int{5, 10, 20, 50, 100},
+	}
+	response := request(t, client, http.MethodPost, server.URL+"/api/v1/rooms", roomBody, map[string]string{"Cookie": ownerSession.String()})
+	var created struct {
+		ID string `json:"id"`
+	}
+	decodeResponse(t, response, &created)
+	response = request(t, client, http.MethodPost, server.URL+"/api/v1/rooms/"+created.ID+"/join", map[string]any{"seat": 1}, map[string]string{"Cookie": playerSession.String()})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("join status = %d: %s", response.StatusCode, readBody(response))
+	}
+	response.Body.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	baseWSURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/v1/rooms/" + created.ID
+	playerHeaders := http.Header{"Cookie": []string{playerSession.String()}}
+	roomConnection, _, err := websocket.Dial(ctx, baseWSURL+"/events", &websocket.DialOptions{HTTPHeader: playerHeaders})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer roomConnection.CloseNow()
+	var roomEvent room.Envelope
+	if err := wsjson.Read(ctx, roomConnection, &roomEvent); err != nil || roomEvent.Type != "table.snapshot" {
+		t.Fatalf("room initial event = %#v, err = %v", roomEvent, err)
+	}
+	voiceConnection, _, err := websocket.Dial(ctx, baseWSURL+"/voice-events", &websocket.DialOptions{HTTPHeader: playerHeaders})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer voiceConnection.CloseNow()
+	var voiceEvent voiceServerEvent
+	if err := wsjson.Read(ctx, voiceConnection, &voiceEvent); err != nil || voiceEvent.Type != "voice.peers" {
+		t.Fatalf("voice initial event = %#v, err = %v", voiceEvent, err)
+	}
+	response = request(t, client, http.MethodGet, server.URL+"/api/v1/rooms/"+created.ID+"/snapshot", nil, map[string]string{"Cookie": ownerSession.String()})
+	var ownerSnapshot room.TableSnapshot
+	decodeResponse(t, response, &ownerSnapshot)
+	var removedUserID string
+	for _, player := range ownerSnapshot.Players {
+		if player.Name == "被移出玩家" {
+			removedUserID = player.ID
+		}
+	}
+	command := map[string]any{
+		"type": "room.remove_player", "requestId": "remove-player", "expectedVersion": ownerSnapshot.Version,
+		"payload": map[string]any{"userId": removedUserID},
+	}
+	response = request(t, client, http.MethodPost, server.URL+"/api/v1/rooms/"+created.ID+"/commands", command, map[string]string{"Cookie": ownerSession.String()})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("remove player status = %d: %s", response.StatusCode, readBody(response))
+	}
+	response.Body.Close()
+	for name, connection := range map[string]*websocket.Conn{"room": roomConnection, "voice": voiceConnection} {
+		for {
+			var event any
+			err := wsjson.Read(ctx, connection, &event)
+			if err == nil {
+				continue
+			}
+			if status := websocket.CloseStatus(err); status != roomMembershipRevoked {
+				t.Fatalf("%s membership close status = %d, err = %v", name, status, err)
+			}
+			break
+		}
+	}
+	response = request(t, client, http.MethodGet, server.URL+"/api/v1/me", nil, map[string]string{"Cookie": playerSession.String()})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("removed player account session status = %d: %s", response.StatusCode, readBody(response))
+	}
+	response.Body.Close()
+}
+
 func request(t *testing.T, client *http.Client, method, url string, body any, headers map[string]string) *http.Response {
 	t.Helper()
 	var reader io.Reader

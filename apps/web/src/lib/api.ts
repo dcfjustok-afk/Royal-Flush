@@ -9,6 +9,10 @@ export function isSessionRevokedClose(code: number) {
 export function isVoiceConnectionReplacedClose(code: number) {
   return code === 4001;
 }
+
+export function isRoomMembershipRevokedClose(code: number) {
+  return code === 4002;
+}
 export const apiMode = import.meta.env.VITE_USE_API === "true";
 
 export class ApiError extends Error {

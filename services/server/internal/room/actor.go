@@ -684,9 +684,13 @@ func (a *Actor) applyCommand(userID string, seat int, command ClientCommand) (an
 				return nil, "", err
 			}
 		}
+		userIDs := make([]string, 0, len(a.identities))
+		for userID := range a.identities {
+			userIDs = append(userIDs, userID)
+		}
 		a.ended = true
 		a.settleAll()
-		return map[string]any{"ended": true}, "room.ended", nil
+		return map[string]any{"ended": true, "userIds": userIDs}, "room.ended", nil
 	default:
 		return nil, "", fmt.Errorf("unsupported command %q", command.Type)
 	}

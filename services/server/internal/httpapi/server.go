@@ -65,6 +65,9 @@ func New(config Config, logger *slog.Logger) *Server {
 	}
 	server := &Server{config: config, log: logger, auth: authService, scores: scoreService, ops: operationsStore, voiceHub: newVoiceHub(), realtime: newRealtimeConnections()}
 	server.rooms = room.NewManagerWithInfrastructure(scoreService, config.RoomStore, config.RoomLease, config.InstanceID)
+	server.rooms.SetSeatReleasedHook(func(userID string) {
+		server.realtime.disconnectUser(userID, roomMembershipRevoked, "room membership revoked")
+	})
 	server.router = server.routes()
 	return server
 }

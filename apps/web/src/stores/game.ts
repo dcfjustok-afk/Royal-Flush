@@ -2,7 +2,7 @@ import type { ChipDenomination, RoomConfig, ScoreLedgerEntry, TableSnapshot } fr
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { emptyRoomConfig, emptySnapshot } from "@/data/empty";
-import { api, ApiError, apiMode, isSessionRevokedClose, type AccountUser } from "@/lib/api";
+import { api, ApiError, apiMode, isRoomMembershipRevokedClose, isSessionRevokedClose, type AccountUser } from "@/lib/api";
 import { VoiceController, type VoiceTransport } from "@/lib/voice";
 
 type Message = { id: string; type: string; text: string; at: string };
@@ -209,6 +209,13 @@ export const useGameStore = defineStore("game", () => {
         connectionState.value = "offline";
         connectionError.value = "登录状态已失效，请重新登录";
         clearAccount();
+        return;
+      }
+      if (isRoomMembershipRevokedClose(event.code)) {
+        shouldReconnect = false;
+        connectionState.value = "offline";
+        connectionError.value = "你已离开或被移出这个房间";
+        voice.disconnect();
         return;
       }
       if (!shouldReconnect) {

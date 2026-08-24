@@ -87,6 +87,7 @@ func (s *Server) roomEvents(writer http.ResponseWriter, request *http.Request) {
 				}
 				continue
 			}
+			s.disconnectDepartedUsers(event)
 			if duplicate && wsjson.Write(ctx, connection, event) != nil {
 				return
 			}

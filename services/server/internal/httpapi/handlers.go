@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/go-chi/chi/v5"
 	"github.com/royal-flush/royal-flush/services/server/internal/auth"
 	"github.com/royal-flush/royal-flush/services/server/internal/operations"
@@ -110,7 +111,7 @@ func (s *Server) logout(writer http.ResponseWriter, request *http.Request) {
 			return
 		}
 		if authenticated {
-			s.realtime.disconnectUser(user.ID)
+			s.realtime.disconnectUser(user.ID, websocket.StatusPolicyViolation, "account session revoked")
 		}
 	}
 	http.SetCookie(writer, &http.Cookie{
@@ -326,6 +327,7 @@ func (s *Server) roomCommand(writer http.ResponseWriter, request *http.Request) 
 		writeDomainError(writer, err)
 		return
 	}
+	s.disconnectDepartedUsers(event)
 	writeJSON(writer, http.StatusOK, map[string]any{"event": event, "duplicate": duplicate})
 }
 

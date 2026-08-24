@@ -1,5 +1,5 @@
 import type { Room as LiveKitRoom } from "livekit-client";
-import { api, isSessionRevokedClose, isVoiceConnectionReplacedClose, type VoiceToken } from "./api";
+import { api, isRoomMembershipRevokedClose, isSessionRevokedClose, isVoiceConnectionReplacedClose, type VoiceToken } from "./api";
 
 export type VoiceTransport = "livekit" | "webrtc";
 
@@ -158,6 +158,11 @@ class MeshVoiceSession {
       if (isVoiceConnectionReplacedClose(event.code)) {
         this.shouldReconnect = false;
         this.handlers.error("语音已在另一个标签页开启");
+        return;
+      }
+      if (isRoomMembershipRevokedClose(event.code)) {
+        this.shouldReconnect = false;
+        this.handlers.error("你已离开或被移出这个房间");
         return;
       }
       if (!this.shouldReconnect) return;
