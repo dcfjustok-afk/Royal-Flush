@@ -47,6 +47,89 @@ func (p *Postgres) AppendRoomEventAndState(ctx context.Context, actorUserID stri
 		return fmt.Errorf("begin room event save: %w", err)
 	}
 	defer tx.Rollback(ctx)
+	if err := appendRoomEventTx(ctx, tx, actorUserID, event, payload); err != nil {
+		return err
+	}
+	if event.Type == "room.table_points_refilled" {
+		if err := syncSeatAllocationTx(ctx, tx, actorUserID, state); err != nil {
+			return err
+		}
+	}
+	if err := saveRoomStateTx(ctx, tx, state, rawState); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit room event state: %w", err)
+	}
+	return nil
+}
+
+func syncSeatAllocationTx(ctx context.Context, tx pgx.Tx, actorUserID string, state room.PersistentState) error {
+	for _, player := range state.Game.Seats {
+		if player == nil || player.UserID != actorUserID {
+			continue
+		}
+		command, err := tx.Exec(ctx, `
+			UPDATE seat_sessions SET allocated_points = $1
+			WHERE id = $2 AND user_id = $3 AND room_id = $4 AND left_at IS NULL`,
+			player.Allocated, player.SeatSessionID, actorUserID, state.Room.ID)
+		if err != nil {
+			return fmt.Errorf("sync seat allocation: %w", err)
+		}
+		if command.RowsAffected() != 1 {
+			return fmt.Errorf("sync seat allocation: active seat session not found")
+		}
+		return nil
+	}
+	return fmt.Errorf("sync seat allocation: actor is not seated")
+}
+
+func (p *Postgres) OpenSeatAndAppendRoomEventAndState(ctx context.Context, seat room.SeatRecord, claimOwnership bool, actorUserID string, event room.Envelope, state room.PersistentState) error {
+	ctx, cancel := context.WithTimeout(ctx, postgresOperationTimeout)
+	defer cancel()
+	payload, err := json.Marshal(event.Payload)
+	if err != nil {
+		return fmt.Errorf("encode room event payload: %w", err)
+	}
+	rawState, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("encode room state: %w", err)
+	}
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin room join: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	if err := ensureUserTx(ctx, tx, seat.UserID, seat.JoinedAt); err != nil {
+		return err
+	}
+	if err := insertSeat(ctx, tx, seat); err != nil {
+		return err
+	}
+	if claimOwnership {
+		command, err := tx.Exec(ctx, `
+			UPDATE rooms SET owner_id = $1, status = 'waiting', empty_since = NULL
+			WHERE id = $2 AND status = 'empty' AND ended_at IS NULL`, seat.UserID, seat.RoomID)
+		if err != nil {
+			return fmt.Errorf("claim empty room ownership: %w", err)
+		}
+		if command.RowsAffected() != 1 {
+			return fmt.Errorf("claim empty room ownership: room is not empty")
+		}
+	}
+	if err := appendRoomEventTx(ctx, tx, actorUserID, event, payload); err != nil {
+		return err
+	}
+	if err := saveRoomStateTx(ctx, tx, state, rawState); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit room join: %w", err)
+	}
+	return nil
+}
+
+func appendRoomEventTx(ctx context.Context, tx pgx.Tx, actorUserID string, event room.Envelope, payload []byte) error {
 	command, err := tx.Exec(ctx, `
 		INSERT INTO room_events (room_id, version, event_type, request_id, actor_user_id, payload, created_at)
 		VALUES ($1, $2, $3, NULLIF($4, ''), NULLIF($5, ''), $6, $7)
@@ -56,12 +139,6 @@ func (p *Postgres) AppendRoomEventAndState(ctx context.Context, actorUserID stri
 	}
 	if command.RowsAffected() != 1 {
 		return fmt.Errorf("save room event: request already exists")
-	}
-	if err := saveRoomStateTx(ctx, tx, state, rawState); err != nil {
-		return err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit room event state: %w", err)
 	}
 	return nil
 }
@@ -107,9 +184,11 @@ func saveRoomStateTx(ctx context.Context, tx pgx.Tx, state room.PersistentState,
 	}
 	status := roomStateStatus(state)
 	if _, err := tx.Exec(ctx, `
-		UPDATE rooms SET version = $2, status = $3,
+		UPDATE rooms SET version = $2, status = $3, code = $4,
+			owner_id = CASE WHEN $5 = '' THEN owner_id ELSE $5 END,
+			empty_since = CASE WHEN $3 = 'empty' THEN COALESCE(empty_since, now()) ELSE NULL END,
 			ended_at = CASE WHEN $3 = 'ended' THEN COALESCE(ended_at, now()) ELSE ended_at END
-		WHERE id = $1`, state.Room.ID, state.Room.Version, status); err != nil {
+		WHERE id = $1`, state.Room.ID, state.Room.Version, status, state.Room.Code, state.Room.OwnerID); err != nil {
 		return fmt.Errorf("update room state metadata: %w", err)
 	}
 	return nil
@@ -118,6 +197,9 @@ func saveRoomStateTx(ctx context.Context, tx pgx.Tx, state room.PersistentState,
 func roomStateStatus(state room.PersistentState) string {
 	if state.Ended {
 		return "ended"
+	}
+	if state.Room.OwnerID == "" || len(state.Identities) == 0 {
+		return "empty"
 	}
 	switch state.Game.Street {
 	case poker.StreetPreflop, poker.StreetFlop, poker.StreetTurn, poker.StreetRiver, poker.StreetShowdown:

@@ -50,3 +50,53 @@ test("运营概览建立视觉回归基线", async ({ page }) => {
   await page.addStyleTag({ content: "time,.admin-topbar>div:first-child>span{visibility:hidden!important}" });
   await expect(page.locator(".admin-shell")).toHaveScreenshot("admin-overview.png");
 });
+
+test("运营搜索和房间详情只接受最后一次异步响应", async ({ page }) => {
+  const user = (id: string, nickname: string) => ({
+    id, nickname, phone: "13800138000", balance: 1000, banned: false,
+    createdAt: "2026-08-24T12:00:00Z", updatedAt: "2026-08-24T12:00:00Z",
+  });
+  await page.route("**/api/v1/admin/users?*", async (route) => {
+    const query = new URL(route.request().url()).searchParams.get("q") ?? "";
+    if (query === "慢") await new Promise((resolve) => setTimeout(resolve, 500));
+    if (query === "快") await new Promise((resolve) => setTimeout(resolve, 20));
+    const users = query === "慢" ? [user("slow-user", "慢结果")] : query === "快" ? [user("fast-user", "快结果")] : [];
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ users }) });
+  });
+  await page.route("**/api/v1/admin/rooms/room-demo-*", async (route) => {
+    const roomId = new URL(route.request().url()).pathname.split("/").at(-1)!;
+    const slow = roomId === "room-demo-2806";
+    await new Promise((resolve) => setTimeout(resolve, slow ? 300 : 20));
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        roomId, roomCode: slow ? "RF-2806" : "RF-9132", roomName: slow ? "慢房间详情" : "快房间详情",
+        ownerId: "u1", version: 1, handNumber: 1, street: "waiting", pot: 0, players: [],
+        config: { blindPreset: "5/10", actionSeconds: 30, voiceEnabled: true, chipDenominations: [5, 10, 20, 50, 100] }, messages: [],
+      }),
+    });
+  });
+
+  await page.getByRole("button", { name: /用户与积分/ }).click();
+  const search = page.getByLabel("搜索用户");
+  await search.fill("慢");
+  await page.waitForTimeout(350);
+  await search.fill("快");
+  await expect(page.getByText("快结果")).toBeVisible();
+  await page.waitForTimeout(500);
+  await expect(page.getByText("快结果")).toBeVisible();
+  await expect(page.getByText("慢结果")).toHaveCount(0);
+
+  await page.getByRole("button", { name: /活跃房间/ }).click();
+  await page.getByRole("button", { name: /周六夜场/ }).click();
+  await page.getByRole("button", { name: /慢速夜场/ }).click();
+  await expect(page.getByRole("heading", { name: "快房间详情" })).toBeVisible();
+  await page.waitForTimeout(350);
+  await expect(page.getByRole("heading", { name: "快房间详情" })).toBeVisible();
+
+  await page.getByRole("button", { name: /周六夜场/ }).click();
+  await page.getByRole("button", { name: "关闭房间详情" }).click();
+  await page.waitForTimeout(350);
+  await expect(page.locator(".detail-drawer")).toHaveCount(0);
+});

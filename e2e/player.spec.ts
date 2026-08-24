@@ -260,6 +260,65 @@ test("准备请求进行中刷新会从服务端恢复最终状态", async ({ pa
   expect(commands).toBe(1);
 });
 
+test("玩家可以从等候室主动离开且快速点击只提交一次", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1440", "代表性桌面项目覆盖等候室离开流程");
+  const waiting = structuredClone(playerSnapshot);
+  waiting.street = "waiting";
+  waiting.handNumber = 0;
+  waiting.players.forEach((player) => {
+    player.isCurrentActor = false;
+    player.isReady = false;
+  });
+  let leaveCommands = 0;
+  await page.route("**/api/v1/rooms/room-saturday/snapshot", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify(waiting),
+  }));
+  await page.route("**/api/v1/rooms/room-saturday/commands", async (route) => {
+    const command = route.request().postDataJSON() as { type: string };
+    if (command.type === "room.leave") leaveCommands++;
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ duplicate: false, event: { type: "room.player_leaving" } }) });
+  });
+  page.on("dialog", (dialog) => dialog.accept());
+
+  await page.goto("/rooms/room-saturday/waiting");
+  const leave = page.getByRole("button", { name: "离开当前房间" });
+  await leave.evaluate((button: HTMLButtonElement) => {
+    button.click();
+    button.click();
+  });
+  await expect(page).toHaveURL(/\/$/);
+  expect(leaveCommands).toBe(1);
+  await expect(page.locator(".form-message.error")).toHaveCount(0);
+});
+
+test("复制权限被拒绝时不会谎报成功并提供手动方案", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1440", "代表性桌面项目覆盖剪贴板拒绝边界");
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: () => Promise.reject(new DOMException("denied", "NotAllowedError")) },
+    });
+  });
+  const waiting = structuredClone(playerSnapshot);
+  waiting.street = "waiting";
+  waiting.handNumber = 0;
+  waiting.players.forEach((player) => (player.isCurrentActor = false));
+  await page.route("**/api/v1/rooms/room-saturday/snapshot", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify(waiting),
+  }));
+
+  await page.goto("/rooms/room-saturday/waiting");
+  const copy = page.getByRole("button", { name: "复制邀请链接" });
+  await copy.click();
+  await expect(copy).toHaveText(/复制邀请链接/);
+  await expect(page.getByText("无法复制邀请链接，请手动选择下方链接复制")).toBeVisible();
+});
+
 test("跨房失败会保留原房间且重试成功后进入目标房间", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1440", "代表性桌面项目覆盖跨房失败与重试");
   const oldRoom = structuredClone(playerSnapshot);
@@ -353,6 +412,27 @@ test("牌桌在目标视口内保持完整且筹码不会改变布局", async ({
   const after = await chip.boundingBox();
   expect({ width: after?.width, height: after?.height }).toEqual({ width: before?.width, height: before?.height });
   await expectInsideViewport(page.getByRole("button", { name: /确认加注 20/ }), page);
+});
+
+test("牌桌行动快速双击只提交一次且不显示伪失败", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1440", "代表性桌面项目覆盖牌桌行动并发");
+  let actionCommands = 0;
+  await page.route("**/api/v1/rooms/room-saturday/commands", async (route) => {
+    const command = route.request().postDataJSON() as { type: string };
+    if (command.type === "action.call") actionCommands++;
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ duplicate: false, event: { type: "game.action_applied" } }) });
+  });
+
+  await page.goto("/rooms/room-saturday/table");
+  const call = page.getByRole("button", { name: "跟注 10" });
+  await call.evaluate((button: HTMLButtonElement) => {
+    button.click();
+    button.click();
+  });
+  await expect(call).toBeEnabled();
+  expect(actionCommands).toBe(1);
+  await expect(page.locator(".table-state-banner")).toHaveCount(0);
 });
 
 test("房间状态与当前路由不一致时会进入正确页面", async ({ page }, testInfo) => {

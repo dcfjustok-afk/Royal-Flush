@@ -49,6 +49,8 @@ const roomDetailBusy = ref(false);
 const roomDetailError = ref("");
 let resetTimer: number | undefined;
 let searchTimer: number | undefined;
+let userRequestGeneration = 0;
+let roomDetailRequestGeneration = 0;
 
 const roomById = computed(() => new Map(rooms.value.map((room) => [room.id, room])));
 const filteredUsers = computed(() => {
@@ -69,15 +71,19 @@ async function loadAll() {
   if (!apiMode || authState.value !== "authorized") return;
   loading.value = true;
   loadErrors.value = [];
+  const userGeneration = ++userRequestGeneration;
+  const userQuery = search.value.trim();
   const [epochResult, roomResult, userResult, reportResult, auditResult] = await Promise.allSettled([
-    adminApi.epochs(), adminApi.rooms(), adminApi.users(search.value.trim()), adminApi.reports(), adminApi.audits(),
+    adminApi.epochs(), adminApi.rooms(), adminApi.users(userQuery), adminApi.reports(), adminApi.audits(),
   ]);
   if (epochResult.status === "fulfilled" && epochResult.value.epochs?.[0]) epoch.value = epochResult.value.epochs[0].id;
   else if (epochResult.status === "rejected") loadErrors.value.push(`积分周期：${errorMessage(epochResult.reason, "加载失败")}`);
   if (roomResult.status === "fulfilled") rooms.value = roomResult.value.rooms ?? [];
   else loadErrors.value.push(`活跃房间：${errorMessage(roomResult.reason, "加载失败")}`);
-  if (userResult.status === "fulfilled") users.value = userResult.value.users ?? [];
-  else loadErrors.value.push(`用户列表：${errorMessage(userResult.reason, "加载失败")}`);
+  if (userGeneration === userRequestGeneration) {
+    if (userResult.status === "fulfilled") users.value = userResult.value.users ?? [];
+    else loadErrors.value.push(`用户列表：${errorMessage(userResult.reason, "加载失败")}`);
+  }
   if (reportResult.status === "fulfilled") reports.value = reportResult.value.reports ?? [];
   else loadErrors.value.push(`举报队列：${errorMessage(reportResult.reason, "加载失败")}`);
   if (auditResult.status === "fulfilled") audits.value = auditResult.value.audits ?? [];
@@ -138,7 +144,11 @@ async function refreshSection() {
   loading.value = true;
   loadErrors.value = [];
   try {
-    if (activeSection.value === "users") users.value = (await adminApi.users(search.value.trim())).users ?? [];
+    if (activeSection.value === "users") {
+      const generation = ++userRequestGeneration;
+      const result = await adminApi.users(search.value.trim());
+      if (generation === userRequestGeneration) users.value = result.users ?? [];
+    }
     else if (activeSection.value === "reports") reports.value = (await adminApi.reports()).reports ?? [];
     else if (activeSection.value === "audit") audits.value = (await adminApi.audits()).audits ?? [];
     else rooms.value = (await adminApi.rooms()).rooms ?? [];
@@ -223,17 +233,27 @@ async function handleReport() {
 }
 
 async function inspectRoom(room: AdminRoom) {
+	const generation = ++roomDetailRequestGeneration;
   roomDetail.value = null;
   roomDetailError.value = "";
   roomDetailBusy.value = true;
   try {
     if (!apiMode) throw new Error("运营服务未配置，无法读取房间详情");
-    roomDetail.value = await adminApi.room(room.id);
+    const detail = await adminApi.room(room.id);
+		if (generation !== roomDetailRequestGeneration) return;
+		roomDetail.value = detail;
   } catch (reason) {
-    roomDetailError.value = errorMessage(reason, "房间详情加载失败");
+		if (generation === roomDetailRequestGeneration) roomDetailError.value = errorMessage(reason, "房间详情加载失败");
   } finally {
-    roomDetailBusy.value = false;
+		if (generation === roomDetailRequestGeneration) roomDetailBusy.value = false;
   }
+}
+
+function closeRoomDetail() {
+	roomDetailRequestGeneration++;
+	roomDetail.value = null;
+	roomDetailError.value = "";
+	roomDetailBusy.value = false;
 }
 
 function maskPhone(phone: string) {
@@ -263,14 +283,22 @@ function auditAction(action: string) {
 watch(search, () => {
   if (!apiMode) return;
   window.clearTimeout(searchTimer);
+	const generation = ++userRequestGeneration;
+	const query = search.value.trim();
   searchTimer = window.setTimeout(async () => {
-    try { users.value = (await adminApi.users(search.value.trim())).users ?? []; }
-    catch (reason) { loadErrors.value = [errorMessage(reason, "用户搜索失败")]; }
+    try {
+			const result = await adminApi.users(query);
+			if (generation === userRequestGeneration) users.value = result.users ?? [];
+		} catch (reason) {
+			if (generation === userRequestGeneration) loadErrors.value = [errorMessage(reason, "用户搜索失败")];
+		}
   }, 300);
 });
 
 onMounted(initialize);
 onBeforeUnmount(() => {
+	userRequestGeneration++;
+	roomDetailRequestGeneration++;
   window.clearTimeout(resetTimer);
   window.clearTimeout(searchTimer);
 });
@@ -354,7 +382,7 @@ onBeforeUnmount(() => {
       </template>
     </main>
 
-    <aside v-if="roomDetailBusy || roomDetail || roomDetailError" class="detail-drawer" aria-label="房间详情"><header><div><h2>{{ roomDetail?.roomName ?? '房间详情' }}</h2><span>{{ roomDetail?.roomCode }}</span></div><button type="button" aria-label="关闭房间详情" @click="roomDetail = null; roomDetailError = ''; roomDetailBusy = false"><X /></button></header><div v-if="roomDetailBusy" class="drawer-state"><LoaderCircle class="spin" />正在读取权威快照</div><div v-else-if="roomDetailError" class="drawer-state error"><WifiOff />{{ roomDetailError }}</div><template v-else-if="roomDetail"><dl><div><dt>牌局阶段</dt><dd>{{ roomDetail.street }}</dd></div><div><dt>手牌 / 版本</dt><dd>#{{ roomDetail.handNumber }} · v{{ roomDetail.version }}</dd></div><div><dt>底池</dt><dd>{{ roomDetail.pot.toLocaleString('zh-CN') }}</dd></div><div><dt>盲注</dt><dd>{{ roomDetail.config.blindPreset }}</dd></div></dl><h3>座位状态</h3><ol class="drawer-players"><li v-for="player in roomDetail.players" :key="player.id"><span><strong>{{ player.name }}</strong><small>{{ player.id }} · {{ player.seat + 1 }} 号位</small></span><b>{{ player.tablePoints.toLocaleString('zh-CN') }}</b><em>{{ player.status }}</em></li></ol><h3>筹码面额</h3><div class="drawer-chips"><span v-for="chip in roomDetail.config.chipDenominations" :key="chip">{{ chip }}</span></div></template></aside>
+    <aside v-if="roomDetailBusy || roomDetail || roomDetailError" class="detail-drawer" aria-label="房间详情"><header><div><h2>{{ roomDetail?.roomName ?? '房间详情' }}</h2><span>{{ roomDetail?.roomCode }}</span></div><button type="button" aria-label="关闭房间详情" @click="closeRoomDetail"><X /></button></header><div v-if="roomDetailBusy" class="drawer-state"><LoaderCircle class="spin" />正在读取权威快照</div><div v-else-if="roomDetailError" class="drawer-state error"><WifiOff />{{ roomDetailError }}</div><template v-else-if="roomDetail"><dl><div><dt>牌局阶段</dt><dd>{{ roomDetail.street }}</dd></div><div><dt>手牌 / 版本</dt><dd>#{{ roomDetail.handNumber }} · v{{ roomDetail.version }}</dd></div><div><dt>底池</dt><dd>{{ roomDetail.pot.toLocaleString('zh-CN') }}</dd></div><div><dt>盲注</dt><dd>{{ roomDetail.config.blindPreset }}</dd></div></dl><h3>座位状态</h3><ol class="drawer-players"><li v-for="player in roomDetail.players" :key="player.id"><span><strong>{{ player.name }}</strong><small>{{ player.id }} · {{ player.seat + 1 }} 号位</small></span><b>{{ player.tablePoints.toLocaleString('zh-CN') }}</b><em>{{ player.status }}</em></li></ol><h3>筹码面额</h3><div class="drawer-chips"><span v-for="chip in roomDetail.config.chipDenominations" :key="chip">{{ chip }}</span></div></template></aside>
 
     <div v-if="resetOpen" class="modal-backdrop" @click.self="closeReset"><section class="reset-dialog" role="dialog" aria-modal="true" aria-labelledby="reset-title"><header><span><AlertTriangle /></span><div><h2 id="reset-title">重置全站积分</h2><p>所有账号将立即进入新的积分周期。</p></div><button type="button" aria-label="关闭" @click="closeReset"><X /></button></header><template v-if="!resetDone"><div class="reset-impact"><strong>不会中断活跃牌局</strong><p>当前余额统一变为 1,000；进行中牌局结束后，净输赢继续结算到新周期。</p></div><label>重置原因<textarea v-model="resetReason" maxlength="500" rows="3" placeholder="至少填写 4 个字" /></label><label>输入 RESET ALL SCORES 确认<input v-model="confirmation" autocomplete="off" /></label><p v-if="resetError" class="reset-error" role="alert">{{ resetError }}</p><footer><button class="tool-button" type="button" @click="closeReset">取消</button><button class="danger-button" type="button" :disabled="resetBusy || confirmation !== 'RESET ALL SCORES' || resetReason.trim().length < 4" @click="performReset"><LoaderCircle v-if="resetBusy" class="spin" /><RotateCcw v-else />{{ resetBusy ? '正在重置' : '确认重置' }}</button></footer></template><div v-else class="reset-success" role="status"><CheckCircle2 /><strong>重置已完成</strong><span>当前积分周期为 Epoch {{ epoch }}</span></div></section></div>
 

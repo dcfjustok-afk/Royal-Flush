@@ -184,6 +184,59 @@ func TestSidePotsAndOddPointDistribution(t *testing.T) {
 	}
 }
 
+func TestSeatLifecycleAndTimeoutMatrix(t *testing.T) {
+	t.Run("refill disconnect withdraw and remove", func(t *testing.T) {
+		game, err := NewGame(2, 5, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		player, err := game.Sit("u1", "玩家一", 0, "seat-u1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		player.Stack = 0
+		player.Away = true
+		if err := game.Refill(0); err != nil || player.Stack != 1000 || player.Allocated != 2000 || player.Away {
+			t.Fatalf("refill result player=%#v err=%v", player, err)
+		}
+		if err := game.SetDisconnected(0, true); err != nil || !player.Disconnected {
+			t.Fatalf("disconnect result player=%#v err=%v", player, err)
+		}
+		if err := game.Withdraw(0); err != nil || !player.Leaving || !player.Away || player.Disconnected {
+			t.Fatalf("withdraw result player=%#v err=%v", player, err)
+		}
+		removed, err := game.RemoveSeat(0)
+		if err != nil || removed.UserID != "u1" || game.Seats[0] != nil {
+			t.Fatalf("remove result player=%#v err=%v", removed, err)
+		}
+	})
+
+	t.Run("timeout resolves current action", func(t *testing.T) {
+		game, err := NewGame(2, 5, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		first, _ := game.Sit("u1", "玩家一", 0, "seat-u1")
+		second, _ := game.Sit("u2", "玩家二", 1, "seat-u2")
+		first.Ready = true
+		second.Ready = true
+		if err := game.StartHand(); err != nil {
+			t.Fatal(err)
+		}
+		seat := game.Actor
+		toCall := game.ToCall(seat)
+		if err := game.Timeout(seat); err != nil {
+			t.Fatal(err)
+		}
+		if toCall > 0 && !game.Seats[seat].Folded {
+			t.Fatal("timeout with chips to call did not fold the actor")
+		}
+		if toCall == 0 && game.Seats[seat].Folded {
+			t.Fatal("timeout with no chips to call folded instead of checking")
+		}
+	})
+}
+
 func cards(values ...string) []Card {
 	result := make([]Card, 0, len(values))
 	for _, value := range values {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Check, Copy, Headphones, Link2, Mic, MicOff, Play, Settings2, UserPlus } from "@lucide/vue";
+import { Check, Copy, Headphones, Link2, LogOut, Mic, MicOff, Play, Settings2, UserPlus } from "@lucide/vue";
 import { computed, onMounted, ref, watch } from "vue";
 import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
 import AppHeader from "@/components/AppHeader.vue";
@@ -30,9 +30,15 @@ watch(() => [store.snapshot.roomId, store.snapshot.street] as const, ([roomId, s
 });
 
 async function copyInvite() {
-  await navigator.clipboard.writeText(inviteUrl.value).catch(() => undefined);
-  copied.value = true;
-  window.setTimeout(() => (copied.value = false), 1800);
+	actionError.value = "";
+	try {
+		await navigator.clipboard.writeText(inviteUrl.value);
+		copied.value = true;
+		window.setTimeout(() => (copied.value = false), 1800);
+	} catch {
+		copied.value = false;
+		actionError.value = "无法复制邀请链接，请手动选择下方链接复制";
+	}
 }
 
 async function toggleReady() {
@@ -55,6 +61,18 @@ async function startGame() {
   } catch (reason) {
     actionError.value = reason instanceof Error ? reason.message : "无法开始牌局";
   }
+}
+
+async function leaveRoom() {
+	if (store.commandPending || !window.confirm("离开当前房间并结算这个座位？")) return;
+	actionError.value = "";
+	try {
+		await store.sendCommand("room.leave");
+		store.disconnectRoomEvents();
+		await router.push("/");
+	} catch (reason) {
+		actionError.value = reason instanceof Error ? reason.message : "离开房间失败";
+	}
 }
 
 async function redirectAfterUnavailableRoom(reason: unknown) {
@@ -126,8 +144,9 @@ function selectMicrophone(event: Event) {
         <section class="invite-link"><header><h2>邀请链接</h2><Link2 /></header><code>{{ inviteUrl }}</code></section>
         <RoomManagementPanel v-if="isOwner" @room-ended="router.push('/')" />
         <p v-if="actionError" class="form-message error">{{ actionError }}</p>
+        <button class="button light wide" type="button" :disabled="store.commandPending" @click="leaveRoom"><LogOut />{{ store.commandPending ? "正在处理" : "离开当前房间" }}</button>
         <button class="ready-button" :class="{ ready }" type="button" :disabled="store.commandPending" @click="toggleReady"><Check v-if="ready" /><span><strong>{{ store.commandPending ? "正在更新" : ready ? "已准备" : "准备入局" }}</strong><small>{{ ready ? "等待房主开始" : "确认牌局设置和语音状态" }}</small></span></button>
-        <button class="button primary wide" type="button" :disabled="!ready || !isOwner || readyCount < 2 || !store.backendOnline" @click="startGame"><Play />{{ isOwner ? (readyCount < 2 ? "等待至少两人准备" : "开始牌局") : "等待房主开局" }}</button>
+        <button class="button primary wide" type="button" :disabled="store.commandPending || !ready || !isOwner || readyCount < 2 || !store.backendOnline" @click="startGame"><Play />{{ isOwner ? (readyCount < 2 ? "等待至少两人准备" : "开始牌局") : "等待房主开局" }}</button>
       </aside>
     </main>
   </div>
