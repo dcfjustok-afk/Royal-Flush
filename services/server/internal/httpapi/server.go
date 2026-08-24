@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/royal-flush/royal-flush/services/server/internal/auth"
+	"github.com/royal-flush/royal-flush/services/server/internal/operations"
 	"github.com/royal-flush/royal-flush/services/server/internal/poker"
 	"github.com/royal-flush/royal-flush/services/server/internal/room"
 	"github.com/royal-flush/royal-flush/services/server/internal/score"
@@ -27,6 +28,8 @@ type Config struct {
 	RoomStore      room.Store
 	RoomLease      room.Lease
 	InstanceID     string
+	Operations     operations.Store
+	AdminUserIDs   map[string]bool
 }
 
 type Server struct {
@@ -35,6 +38,7 @@ type Server struct {
 	auth   *auth.Service
 	scores *score.Service
 	rooms  *room.Manager
+	ops    operations.Store
 	router http.Handler
 }
 
@@ -48,7 +52,11 @@ func New(config Config, logger *slog.Logger) *Server {
 	}
 	authService := auth.NewService(config.Development, nil)
 	scoreService := score.NewServiceWithStore(config.ScoreStore, nil)
-	server := &Server{config: config, log: logger, auth: authService, scores: scoreService}
+	operationsStore := config.Operations
+	if operationsStore == nil {
+		operationsStore = operations.NewMemoryStore()
+	}
+	server := &Server{config: config, log: logger, auth: authService, scores: scoreService, ops: operationsStore}
 	server.rooms = room.NewManagerWithInfrastructure(scoreService, config.RoomStore, config.RoomLease, config.InstanceID)
 	server.router = server.routes()
 	return server
@@ -83,6 +91,7 @@ func (s *Server) routes() http.Handler {
 		protected.Get("/api/v1/me", s.me)
 		protected.Post("/api/v1/me/score-additions", s.addScore)
 		protected.Get("/api/v1/me/score-ledger", s.scoreLedger)
+		protected.Post("/api/v1/reports", s.createReport)
 		protected.Post("/api/v1/rooms", s.createRoom)
 		protected.Post("/api/v1/rooms/{roomID}/join", s.joinRoom)
 		protected.Get("/api/v1/rooms/{roomID}/snapshot", s.roomSnapshot)
@@ -91,6 +100,13 @@ func (s *Server) routes() http.Handler {
 		protected.Get("/api/v1/rooms/{roomID}/events", s.roomEvents)
 		protected.Post("/api/v1/admin/score-resets", s.resetScores)
 		protected.Get("/api/v1/admin/score-epochs", s.scoreEpochs)
+		protected.Get("/api/v1/admin/users", s.adminUsers)
+		protected.Post("/api/v1/admin/users/{userID}/ban-actions", s.adminSetUserBanned)
+		protected.Get("/api/v1/admin/rooms", s.adminRooms)
+		protected.Get("/api/v1/admin/rooms/{roomID}", s.adminRoom)
+		protected.Get("/api/v1/admin/reports", s.adminReports)
+		protected.Post("/api/v1/admin/reports/{reportID}/resolution", s.adminHandleReport)
+		protected.Get("/api/v1/admin/audit-log", s.adminAudits)
 	})
 	return router
 }
@@ -109,13 +125,31 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			}
 			permissions := []string(nil)
 			if request.Header.Get("X-Admin") == "true" {
-				permissions = append(permissions, "score:reset-all", "admin:read")
+				permissions = append(permissions, "score:reset-all", "admin:read", "user:ban", "report:manage")
 			}
 			user = s.auth.EnsureDevelopmentUser(userID, request.Header.Get("X-User-Name"), permissions...)
 			ok = true
 		}
 		if !ok {
 			writeProblem(writer, http.StatusUnauthorized, "authentication_required", "请先完成手机号验证码登录")
+			return
+		}
+		if s.config.AdminUserIDs[user.ID] {
+			for _, permission := range []string{"score:reset-all", "admin:read", "user:ban", "report:manage"} {
+				user.Permissions[permission] = true
+			}
+		}
+		if err := s.ops.UpsertUser(request.Context(), operations.UserIdentity{ID: user.ID, Phone: user.Phone, Nickname: user.Nickname, CreatedAt: user.CreatedAt}); err != nil {
+			writeProblem(writer, http.StatusServiceUnavailable, "identity_store_unavailable", "用户资料暂时无法保存")
+			return
+		}
+		banned, err := s.ops.IsBanned(request.Context(), user.ID)
+		if err != nil {
+			writeProblem(writer, http.StatusServiceUnavailable, "identity_store_unavailable", "用户状态暂时无法确认")
+			return
+		}
+		if banned {
+			writeProblem(writer, http.StatusForbidden, "account_banned", "账号已被平台管理员封禁")
 			return
 		}
 		next.ServeHTTP(writer, request.WithContext(context.WithValue(request.Context(), userContextKey, user)))
@@ -190,6 +224,10 @@ func writeDomainError(writer http.ResponseWriter, err error) {
 		status, code = http.StatusTooManyRequests, "score_rate_limited"
 	case errors.Is(err, auth.ErrInvalidCode):
 		status, code = http.StatusUnauthorized, "invalid_otp"
+	case errors.Is(err, operations.ErrUserNotFound), errors.Is(err, operations.ErrReportNotFound):
+		status, code = http.StatusNotFound, "not_found"
+	case errors.Is(err, operations.ErrReasonRequired), errors.Is(err, operations.ErrInvalidStatus):
+		status, code = http.StatusBadRequest, "invalid_operation"
 	}
 	writeProblem(writer, status, code, err.Error())
 }

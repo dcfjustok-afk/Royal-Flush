@@ -141,6 +141,14 @@ func (s *Service) EnsureDevelopmentUser(userID, nickname string, permissions ...
 	return cloneUser(user)
 }
 
+func (s *Service) SetBanned(userID string, banned bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if user := s.usersByID[userID]; user != nil {
+		user.Banned = banned
+	}
+}
+
 func cloneUser(user *User) User {
 	copy := *user
 	copy.Permissions = make(map[string]bool, len(user.Permissions))

@@ -81,10 +81,12 @@ func main() {
 		Voice:          voice.Config{URL: os.Getenv("LIVEKIT_URL"), APIKey: os.Getenv("LIVEKIT_API_KEY"), APISecret: os.Getenv("LIVEKIT_API_SECRET")},
 		RoomLease:      roomLease,
 		InstanceID:     instanceID,
+		AdminUserIDs:   stringSet(splitCSV(os.Getenv("ADMIN_USER_IDS"))),
 	}
 	if database != nil {
 		applicationConfig.ScoreStore = database
 		applicationConfig.RoomStore = database
+		applicationConfig.Operations = database
 	}
 	application := httpapi.New(applicationConfig, logger)
 	defer application.Close()
@@ -133,6 +135,14 @@ func splitCSV(value string) []string {
 		if trimmed := strings.TrimSpace(part); trimmed != "" {
 			result = append(result, trimmed)
 		}
+	}
+	return result
+}
+
+func stringSet(values []string) map[string]bool {
+	result := make(map[string]bool, len(values))
+	for _, value := range values {
+		result[value] = true
 	}
 	return result
 }

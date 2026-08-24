@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/royal-flush/royal-flush/services/server/internal/operations"
 	"github.com/royal-flush/royal-flush/services/server/internal/room"
 )
 
@@ -41,6 +42,10 @@ func (s *Server) verifyOTP(writer http.ResponseWriter, request *http.Request) {
 	user, token, err := s.auth.Verify(input.Phone, input.Code, input.Nickname)
 	if err != nil {
 		writeDomainError(writer, err)
+		return
+	}
+	if err := s.ops.UpsertUser(request.Context(), operations.UserIdentity{ID: user.ID, Phone: user.Phone, Nickname: user.Nickname, CreatedAt: user.CreatedAt}); err != nil {
+		writeProblem(writer, http.StatusServiceUnavailable, "identity_store_unavailable", "用户资料暂时无法保存")
 		return
 	}
 	s.scores.EnsureUser(user.ID)

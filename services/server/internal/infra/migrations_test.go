@@ -53,4 +53,12 @@ func TestInitialMigrationContainsCriticalIntegrityConstraints(t *testing.T) {
 	if !strings.Contains(string(stateMigration), "CREATE TABLE room_states") {
 		t.Fatal("room state migration is missing the snapshot table")
 	}
+	reportPath := filepath.Join(filepath.Dir(source), "..", "..", "migrations", "006_report_idempotency.sql")
+	reportMigration, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(reportMigration), "reports_idempotent_request") {
+		t.Fatal("report migration is missing its idempotency index")
+	}
 }

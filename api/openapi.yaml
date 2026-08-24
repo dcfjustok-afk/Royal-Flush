@@ -243,6 +243,167 @@ paths:
                   accessToken: { type: string }
                   expiresAt: { type: string, format: date-time }
                   reason: { type: string }
+  /reports:
+    post:
+      operationId: createReport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [category, detail, requestId]
+              properties:
+                roomId: { type: string }
+                subjectUserId: { type: string }
+                category: { type: string, enum: [conduct, voice, technical, other] }
+                detail: { type: string, minLength: 2, maxLength: 1000 }
+                requestId: { type: string, minLength: 1 }
+      responses:
+        '201':
+          description: 举报已登记
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [report, duplicate]
+                properties:
+                  report: { $ref: '#/components/schemas/Report' }
+                  duplicate: { type: boolean }
+  /admin/users:
+    get:
+      operationId: listAdminUsers
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+      responses:
+        '200':
+          description: 用户与积分列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [users]
+                properties:
+                  users: { type: array, items: { $ref: '#/components/schemas/OperationsUser' } }
+  /admin/users/{userID}/ban-actions:
+    parameters:
+      - name: userID
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: setAdminUserBanned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [banned, reason, requestId]
+              properties:
+                banned: { type: boolean }
+                reason: { type: string, minLength: 1 }
+                requestId: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: 用户封禁状态
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user, duplicate]
+                properties:
+                  user: { $ref: '#/components/schemas/OperationsUser' }
+                  duplicate: { type: boolean }
+  /admin/rooms:
+    get:
+      operationId: listAdminRooms
+      responses:
+        '200':
+          description: 当前实例拥有租约的活跃房间
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rooms]
+                properties:
+                  rooms: { type: array, items: { $ref: '#/components/schemas/AdminRoom' } }
+  /admin/rooms/{roomID}:
+    parameters:
+      - $ref: '#/components/parameters/RoomID'
+    get:
+      operationId: getAdminRoom
+      responses:
+        '200':
+          description: 不包含任何玩家底牌的运营牌桌快照
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TableSnapshot' }
+  /admin/reports:
+    get:
+      operationId: listAdminReports
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [open, reviewing, resolved, dismissed] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+      responses:
+        '200':
+          description: 举报处理队列
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reports]
+                properties:
+                  reports: { type: array, items: { $ref: '#/components/schemas/Report' } }
+  /admin/reports/{reportID}/resolution:
+    parameters:
+      - name: reportID
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: resolveAdminReport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [status, reason, requestId]
+              properties:
+                status: { type: string, enum: [resolved, dismissed] }
+                reason: { type: string, minLength: 1 }
+                requestId: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: 举报处理结果
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [report, duplicate]
+                properties:
+                  report: { $ref: '#/components/schemas/Report' }
+                  duplicate: { type: boolean }
+  /admin/audit-log:
+    get:
+      operationId: listAdminAuditLog
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+      responses:
+        '200':
+          description: 平台管理员操作审计
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [audits]
+                properties:
+                  audits: { type: array, items: { $ref: '#/components/schemas/AdminAudit' } }
   /admin/score-resets:
     post:
       operationId: resetAllScores
@@ -453,6 +614,63 @@ components:
         administrator: { type: string }
         reason: { type: string }
         affectedUsers: { type: integer }
+        createdAt: { type: string, format: date-time }
+    OperationsUser:
+      type: object
+      required: [id, phone, nickname, balance, banned, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        phone: { type: string }
+        nickname: { type: string }
+        balance: { type: integer, format: int64 }
+        activeRoomId: { type: string }
+        banned: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    AdminRoom:
+      type: object
+      required: [id, code, name, ownerId, ownerName, players, onlinePlayers, maxPlayers, blindPreset, handNumber, voiceEnabled, status, version, createdAt]
+      properties:
+        id: { type: string }
+        code: { type: string }
+        name: { type: string }
+        ownerId: { type: string }
+        ownerName: { type: string }
+        players: { type: integer }
+        onlinePlayers: { type: integer }
+        maxPlayers: { type: integer }
+        blindPreset: { type: string }
+        handNumber: { type: integer, format: int64 }
+        voiceEnabled: { type: boolean }
+        status: { type: string, enum: [waiting, playing, ended] }
+        version: { type: integer, format: int64 }
+        createdAt: { type: string, format: date-time }
+    Report:
+      type: object
+      required: [id, reporterId, category, detail, status, createdAt]
+      properties:
+        id: { type: string }
+        reporterId: { type: string }
+        roomId: { type: string }
+        subjectUserId: { type: string }
+        category: { type: string, enum: [conduct, voice, technical, other] }
+        detail: { type: string }
+        status: { type: string, enum: [open, reviewing, resolved, dismissed] }
+        handledBy: { type: string }
+        handledAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+    AdminAudit:
+      type: object
+      required: [id, administratorId, action, targetType, reason, requestId, metadata, createdAt]
+      properties:
+        id: { type: string }
+        administratorId: { type: string }
+        action: { type: string }
+        targetType: { type: string }
+        targetId: { type: string }
+        reason: { type: string }
+        requestId: { type: string }
+        metadata: { type: object, additionalProperties: true }
         createdAt: { type: string, format: date-time }
 security:
   - sessionCookie: []

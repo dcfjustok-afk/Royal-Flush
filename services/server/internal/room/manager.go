@@ -247,6 +247,63 @@ func (m *Manager) ActiveRoom(userID string) string {
 	return m.activeSeat[userID]
 }
 
+type AdminRoom struct {
+	ID            string    `json:"id"`
+	Code          string    `json:"code"`
+	Name          string    `json:"name"`
+	OwnerID       string    `json:"ownerId"`
+	OwnerName     string    `json:"ownerName"`
+	Players       int       `json:"players"`
+	OnlinePlayers int       `json:"onlinePlayers"`
+	MaxPlayers    int       `json:"maxPlayers"`
+	BlindPreset   string    `json:"blindPreset"`
+	HandNumber    int64     `json:"handNumber"`
+	VoiceEnabled  bool      `json:"voiceEnabled"`
+	Status        string    `json:"status"`
+	Version       int64     `json:"version"`
+	CreatedAt     time.Time `json:"createdAt"`
+}
+
+func (m *Manager) AdminRooms(ctx context.Context) []AdminRoom {
+	m.mu.RLock()
+	actors := make([]*Actor, 0, len(m.rooms))
+	for _, actor := range m.rooms {
+		actors = append(actors, actor)
+	}
+	m.mu.RUnlock()
+	result := make([]AdminRoom, 0, len(actors))
+	for _, actor := range actors {
+		snapshot, err := actor.PublicSnapshot(ctx)
+		if err != nil {
+			continue
+		}
+		status := "waiting"
+		if snapshot.Street == "preflop" || snapshot.Street == "flop" || snapshot.Street == "turn" || snapshot.Street == "river" || snapshot.Street == "showdown" {
+			status = "playing"
+		}
+		if snapshot.Ended {
+			status = "ended"
+		}
+		online := 0
+		owner := ""
+		for _, player := range snapshot.Players {
+			if player.Status != "disconnected" {
+				online++
+			}
+			if player.ID == snapshot.OwnerID {
+				owner = player.Name
+			}
+		}
+		result = append(result, AdminRoom{
+			ID: snapshot.RoomID, Code: snapshot.RoomCode, Name: snapshot.RoomName, OwnerID: snapshot.OwnerID, OwnerName: owner,
+			Players: len(snapshot.Players), OnlinePlayers: online, MaxPlayers: snapshot.Config.MaxPlayers,
+			BlindPreset: snapshot.Config.BlindPreset, HandNumber: snapshot.HandNumber, VoiceEnabled: snapshot.Config.VoiceEnabled,
+			Status: status, Version: snapshot.Version, CreatedAt: actor.CreatedAt,
+		})
+	}
+	return result
+}
+
 func (m *Manager) BroadcastGlobalReset(ctx context.Context, epoch score.Epoch, requestID string) {
 	m.mu.RLock()
 	rooms := make([]*Actor, 0, len(m.rooms))

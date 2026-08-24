@@ -206,6 +206,140 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["createReport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listAdminUsers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/users/{userID}/ban-actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["setAdminUserBanned"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/rooms": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listAdminRooms"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/rooms/{roomID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roomID: components["parameters"]["RoomID"];
+            };
+            cookie?: never;
+        };
+        get: operations["getAdminRoom"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listAdminReports"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/reports/{reportID}/resolution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                reportID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["resolveAdminReport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/audit-log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listAdminAuditLog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/score-resets": {
         parameters: {
             query?: never;
@@ -388,6 +522,69 @@ export interface components {
             administrator: string;
             reason: string;
             affectedUsers: number;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        OperationsUser: {
+            id: string;
+            phone: string;
+            nickname: string;
+            /** Format: int64 */
+            balance: number;
+            activeRoomId?: string;
+            banned: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        AdminRoom: {
+            id: string;
+            code: string;
+            name: string;
+            ownerId: string;
+            ownerName: string;
+            players: number;
+            onlinePlayers: number;
+            maxPlayers: number;
+            blindPreset: string;
+            /** Format: int64 */
+            handNumber: number;
+            voiceEnabled: boolean;
+            /** @enum {string} */
+            status: "waiting" | "playing" | "ended";
+            /** Format: int64 */
+            version: number;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        Report: {
+            id: string;
+            reporterId: string;
+            roomId?: string;
+            subjectUserId?: string;
+            /** @enum {string} */
+            category: "conduct" | "voice" | "technical" | "other";
+            detail: string;
+            /** @enum {string} */
+            status: "open" | "reviewing" | "resolved" | "dismissed";
+            handledBy?: string;
+            /** Format: date-time */
+            handledAt?: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        AdminAudit: {
+            id: string;
+            administratorId: string;
+            action: string;
+            targetType: string;
+            targetId?: string;
+            reason: string;
+            requestId: string;
+            metadata: {
+                [key: string]: unknown;
+            };
             /** Format: date-time */
             createdAt: string;
         };
@@ -745,6 +942,225 @@ export interface operations {
                         /** Format: date-time */
                         expiresAt?: string;
                         reason?: string;
+                    };
+                };
+            };
+        };
+    };
+    createReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    roomId?: string;
+                    subjectUserId?: string;
+                    /** @enum {string} */
+                    category: "conduct" | "voice" | "technical" | "other";
+                    detail: string;
+                    requestId: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 举报已登记 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        report: components["schemas"]["Report"];
+                        duplicate: boolean;
+                    };
+                };
+            };
+        };
+    };
+    listAdminUsers: {
+        parameters: {
+            query?: {
+                q?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 用户与积分列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        users: components["schemas"]["OperationsUser"][];
+                    };
+                };
+            };
+        };
+    };
+    setAdminUserBanned: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    banned: boolean;
+                    reason: string;
+                    requestId: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 用户封禁状态 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        user: components["schemas"]["OperationsUser"];
+                        duplicate: boolean;
+                    };
+                };
+            };
+        };
+    };
+    listAdminRooms: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 当前实例拥有租约的活跃房间 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        rooms: components["schemas"]["AdminRoom"][];
+                    };
+                };
+            };
+        };
+    };
+    getAdminRoom: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roomID: components["parameters"]["RoomID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 不包含任何玩家底牌的运营牌桌快照 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TableSnapshot"];
+                };
+            };
+        };
+    };
+    listAdminReports: {
+        parameters: {
+            query?: {
+                status?: "open" | "reviewing" | "resolved" | "dismissed";
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 举报处理队列 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        reports: components["schemas"]["Report"][];
+                    };
+                };
+            };
+        };
+    };
+    resolveAdminReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                reportID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    status: "resolved" | "dismissed";
+                    reason: string;
+                    requestId: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 举报处理结果 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        report: components["schemas"]["Report"];
+                        duplicate: boolean;
+                    };
+                };
+            };
+        };
+    };
+    listAdminAuditLog: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 平台管理员操作审计 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        audits: components["schemas"]["AdminAudit"][];
                     };
                 };
             };
