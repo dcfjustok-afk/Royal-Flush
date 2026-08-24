@@ -5,6 +5,7 @@ import {
   Search, Send, ShieldAlert, ShieldCheck, Unlock, Users, WifiOff, X, XCircle,
 } from "@lucide/vue";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import ThemeSwitcher from "./ThemeSwitcher.vue";
 import {
   adminApi, ApiError, apiMode,
   type AdminAudit, type AdminRoom, type AdminRoomSnapshot, type OperationsUser, type Report, type SessionUser,
@@ -306,7 +307,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div v-if="apiMode && authState !== 'authorized'" class="admin-auth-shell">
-    <header class="admin-auth-header"><a class="admin-brand" href="/"><span>RF</span><strong>Royal Flush<small>运营控制台</small></strong></a><span>仅限授权运营人员</span></header>
+    <header class="admin-auth-header"><a class="admin-brand" href="/"><span>RF</span><strong>Royal Flush<small>运营控制台</small></strong></a><div><ThemeSwitcher compact /><span>仅限授权运营人员</span></div></header>
     <main class="admin-auth-main">
       <section v-if="authState === 'checking'" class="auth-state" aria-live="polite"><LoaderCircle class="spin" /><h1>正在验证运营身份</h1><p>正在读取当前会话与权限。</p></section>
       <section v-else-if="authState === 'forbidden'" class="auth-state forbidden" role="alert"><ShieldAlert /><h1>当前账号没有运营权限</h1><p>{{ operator ? maskPhone(operator.phone) : '该账号' }} 已完成登录，但不在授权运营名单中。</p><button class="tool-button" type="button" @click="useAnotherAccount"><KeyRound />更换管理员账号</button></section>
@@ -339,7 +340,7 @@ onBeforeUnmount(() => {
     <main class="admin-main">
       <header class="admin-topbar">
         <div><h1>{{ { overview: '运行概览', users: '用户与积分', rooms: '活跃房间', reports: '举报处理', audit: '审计记录' }[activeSection] }}</h1><span>{{ new Intl.DateTimeFormat('zh-CN', { dateStyle: 'long', timeZone: 'Asia/Shanghai' }).format(now) }} · Asia/Shanghai</span></div>
-        <div class="operator"><span class="service-live">{{ apiMode ? '实时接口' : '服务未配置' }}</span><div class="operator-identity"><CircleUserRound /><span><strong>{{ operator?.nickname ?? '运营员' }}</strong><small>{{ operator?.phone ? maskPhone(operator.phone) : '--' }}</small></span></div></div>
+        <div class="operator"><span class="service-live">{{ apiMode ? '实时接口' : '服务未配置' }}</span><ThemeSwitcher /><div class="operator-identity"><CircleUserRound /><span><strong>{{ operator?.nickname ?? '运营员' }}</strong><small>{{ operator?.phone ? maskPhone(operator.phone) : '--' }}</small></span></div></div>
       </header>
 
       <div v-if="loadErrors.length" class="error-band" role="alert"><WifiOff /><span><strong>部分数据未更新</strong>{{ loadErrors.join('；') }}</span><button class="tool-button" type="button" @click="loadAll"><RefreshCw />重试</button></div>
