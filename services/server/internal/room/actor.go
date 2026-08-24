@@ -116,8 +116,8 @@ type actorResponse struct {
 }
 
 type timeoutSignal struct {
-	version int64
-	seat    int
+	generation int64
+	seat       int
 }
 
 type disconnectSignal struct {
@@ -141,6 +141,7 @@ type Actor struct {
 	messages       []SystemMessage
 	version        int64
 	deadline       time.Time
+	actionGen      int64
 	ended          bool
 	processed      map[string]Envelope
 	subscribers    map[chan Envelope]struct{}
@@ -347,12 +348,13 @@ func (a *Actor) Handle(ctx context.Context, userID string, command ClientCommand
 		if strings.HasPrefix(command.Type, "action.") && command.ExpectedVersion != a.version {
 			return nil, ErrVersionConflict
 		}
+		gameVersion := a.game.Version
 		payload, eventType, err := a.applyCommand(userID, seat, command)
 		if err != nil {
 			return nil, err
 		}
 		a.version++
-		if a.game.InHand() && a.game.Actor >= 0 {
+		if a.game.InHand() && a.game.Actor >= 0 && a.game.Version != gameVersion {
 			a.scheduleActionTimeout()
 		}
 		envelope := a.makeEnvelope(eventType, command.RequestID, payload)
@@ -786,7 +788,8 @@ func (a *Actor) scheduleActionTimeoutAt(deadline time.Time) {
 		deadline = time.Now().UTC()
 	}
 	a.deadline = deadline
-	signal := timeoutSignal{version: a.version, seat: a.game.Actor}
+	a.actionGen++
+	signal := timeoutSignal{generation: a.actionGen, seat: a.game.Actor}
 	delay := time.Until(deadline)
 	if delay < 0 {
 		delay = 0
@@ -810,7 +813,7 @@ func (a *Actor) scheduleDisconnectTimeout(userID string) {
 }
 
 func (a *Actor) handleTimeout(signal timeoutSignal) {
-	if a.ended || !a.game.InHand() || signal.version != a.version || signal.seat != a.game.Actor {
+	if a.ended || !a.game.InHand() || signal.generation != a.actionGen || signal.seat != a.game.Actor {
 		return
 	}
 	toCall := a.game.ToCall(signal.seat)

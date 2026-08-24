@@ -572,6 +572,67 @@ func TestRaiseValidationVersionAndIdempotency(t *testing.T) {
 	}
 }
 
+func TestRoomActivityDoesNotPostponeTheActionDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	actor, err := NewActor(testConfig(), Identity{ID: "u1", Name: "房主"}, score.NewService(nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer actor.Close()
+	if _, err := actor.Join(ctx, Identity{ID: "u2", Name: "玩家二"}, 1); err != nil {
+		t.Fatal(err)
+	}
+	ready := json.RawMessage(`{"ready":true}`)
+	for _, userID := range []string{"u1", "u2"} {
+		if _, _, err := actor.Handle(ctx, userID, ClientCommand{Type: "room.ready", RequestID: "ready-" + userID, Payload: ready}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := actor.Handle(ctx, "u1", ClientCommand{Type: "game.start", RequestID: "start"}); err != nil {
+		t.Fatal(err)
+	}
+	events, unsubscribe, err := actor.Subscribe(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unsubscribe()
+	if _, err := actor.call(ctx, func() (any, error) {
+		actor.scheduleActionTimeoutAt(time.Now().Add(40 * time.Millisecond))
+		return nil, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := actor.Snapshot(ctx, "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nonActor := "u1"
+	if localPlayer(snapshot).IsCurrentActor {
+		nonActor = "u2"
+	}
+	if err := actor.PlayerConnected(ctx, nonActor); err != nil {
+		t.Fatal(err)
+	}
+	if err := actor.PlayerDisconnected(ctx, nonActor); err != nil {
+		t.Fatal(err)
+	}
+	message := json.RawMessage(`{"message":"好牌"}`)
+	if _, _, err := actor.Handle(ctx, nonActor, ClientCommand{Type: "room.quick_message", RequestID: "message", Payload: message}); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		select {
+		case event := <-events:
+			if event.Type == "game.action_timed_out" {
+				return
+			}
+		case <-ctx.Done():
+			t.Fatal("room activity postponed the action timeout")
+		}
+	}
+}
+
 func TestScoreBroadcastIsPersistent(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
