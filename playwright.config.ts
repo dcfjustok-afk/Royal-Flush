@@ -28,8 +28,8 @@ export default defineConfig({
     { name: "mobile-landscape", use: { viewport: { width: 844, height: 390 }, isMobile: true, hasTouch: true } },
   ],
   webServer: [
-    { command: "npm run dev:web", url: playerURL, reuseExistingServer: !process.env.CI, timeout: 120_000 },
-    { command: "npm run dev -w @royal-flush/admin -- --port 43174", url: "http://127.0.0.1:43174", reuseExistingServer: !process.env.CI, timeout: 120_000 },
+    { command: "npm run dev:web", url: playerURL, reuseExistingServer: !process.env.CI, timeout: 120_000, env: { VITE_USE_API: "true" } },
+    { command: "npm run dev -w @royal-flush/admin -- --port 43174", url: "http://127.0.0.1:43174", reuseExistingServer: !process.env.CI, timeout: 120_000, env: { VITE_USE_API: "true" } },
     { command: "npm run dev:e2e-api", url: "http://127.0.0.1:5175", reuseExistingServer: !process.env.CI, timeout: 120_000 },
   ],
 });
