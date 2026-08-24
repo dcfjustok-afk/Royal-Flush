@@ -19,6 +19,7 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event.deployment_status.state == 'success' &&
        github.event.deployment.environment == 'production' &&
+       contains(github.event.deployment_status.target_url, 'zeabur.com') &&
        github.event.deployment_status.creator.login != 'github-actions[bot]')
     runs-on: ubuntu-latest
     timeout-minutes: 5
