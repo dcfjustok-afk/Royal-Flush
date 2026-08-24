@@ -250,6 +250,8 @@ func writeDomainError(writer http.ResponseWriter, err error) {
 	status := http.StatusBadRequest
 	code := "invalid_request"
 	switch {
+	case errors.Is(err, room.ErrRoomClosed):
+		status, code = http.StatusGone, "room_closed"
 	case errors.Is(err, room.ErrForbidden):
 		status, code = http.StatusForbidden, "forbidden"
 	case errors.Is(err, room.ErrCannotRemoveOwner):

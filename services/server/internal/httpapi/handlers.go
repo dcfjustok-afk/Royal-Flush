@@ -263,6 +263,10 @@ func (s *Server) publicRoom(writer http.ResponseWriter, request *http.Request) {
 		writeDomainError(writer, err)
 		return
 	}
+	if snapshot.Ended {
+		writeProblem(writer, http.StatusNotFound, "room_not_found", "房间不存在或已结束")
+		return
+	}
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"id": snapshot.RoomID, "code": snapshot.RoomCode, "name": snapshot.RoomName,
 		"ownerId": snapshot.OwnerID, "ownerName": ownerName(snapshot), "onlinePlayers": onlinePlayerCount(snapshot.Players), "maxPlayers": snapshot.Config.MaxPlayers,

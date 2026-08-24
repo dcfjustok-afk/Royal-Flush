@@ -710,6 +710,42 @@ func TestRemovingPlayerRevokesRoomConnectionsButKeepsAccountSession(t *testing.T
 	response.Body.Close()
 }
 
+func TestEndedRoomImmediatelyInvalidatesItsInvite(t *testing.T) {
+	application := New(Config{Development: true}, nil)
+	t.Cleanup(application.Close)
+	server := httptest.NewServer(application.Handler())
+	defer server.Close()
+	client := server.Client()
+	ownerHeaders := map[string]string{"X-User-ID": "ended-owner", "X-User-Name": "Owner"}
+	roomBody := map[string]any{
+		"name": "Ended room", "maxPlayers": 2, "blindPreset": "5/10", "actionSeconds": 20,
+		"voiceEnabled": false, "chipDenominations": []int{5, 10, 20, 50, 100},
+	}
+	response := request(t, client, http.MethodPost, server.URL+"/api/v1/rooms", roomBody, ownerHeaders)
+	var created struct {
+		ID   string `json:"id"`
+		Code string `json:"code"`
+	}
+	decodeResponse(t, response, &created)
+	response = request(t, client, http.MethodPost, server.URL+"/api/v1/rooms/"+created.ID+"/commands", map[string]any{
+		"type": "room.end", "requestId": "end-room", "expectedVersion": 0, "payload": map[string]any{},
+	}, ownerHeaders)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("end room status = %d: %s", response.StatusCode, readBody(response))
+	}
+	response.Body.Close()
+	response = request(t, client, http.MethodGet, server.URL+"/api/v1/rooms/"+created.Code+"/public", nil, nil)
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("ended invite status = %d: %s", response.StatusCode, readBody(response))
+	}
+	response.Body.Close()
+	response = request(t, client, http.MethodPost, server.URL+"/api/v1/rooms/"+created.ID+"/join", map[string]any{"seat": 1}, map[string]string{"X-User-ID": "late-player", "X-User-Name": "Late"})
+	if response.StatusCode != http.StatusGone {
+		t.Fatalf("ended room join status = %d: %s", response.StatusCode, readBody(response))
+	}
+	response.Body.Close()
+}
+
 func request(t *testing.T, client *http.Client, method, url string, body any, headers map[string]string) *http.Response {
 	t.Helper()
 	var reader io.Reader
