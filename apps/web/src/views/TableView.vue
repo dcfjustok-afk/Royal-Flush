@@ -55,6 +55,7 @@ async function copyRoomCode() {
 }
 
 async function playAction(action: () => Promise<void>) {
+	if (store.commandPending) return;
   tableError.value = "";
   try {
     await action();
@@ -84,6 +85,7 @@ async function retryConnection() {
 }
 
 async function leaveTable() {
+	if (store.commandPending) return;
   if (apiMode && !window.confirm("离开牌桌并结算当前座位？")) return;
   tableError.value = "";
   try {
@@ -155,7 +157,7 @@ onBeforeUnmount(() => {
     <header class="table-topbar">
       <div class="table-room-brand"><BrandMark compact /><div><strong>{{ store.snapshot.roomName }}</strong><button type="button" title="复制房间码" @click="copyRoomCode">{{ store.snapshot.roomCode }}<Copy /></button></div></div>
       <div class="station-voice"><VoiceMeter :active="Boolean(speakingPlayer)" /><div><strong>{{ voiceConnectionLabel }}</strong><span>{{ speakingPlayer ? `${speakingPlayer.name}正在说话` : "当前无人说话" }} · {{ store.activePlayers }} 人在线</span></div></div>
-      <div class="table-tools"><span class="network-status" :class="{ unstable: store.connectionState !== 'connected' }"><Wifi v-if="store.connectionState === 'connected'" /><WifiOff v-else />{{ connectionLabel }}</span><button class="icon-button" type="button" :class="{ active: store.microphoneEnabled }" :disabled="store.voiceBusy" :title="store.microphoneEnabled ? '关闭麦克风' : '开启麦克风'" :aria-label="store.microphoneEnabled ? '关闭麦克风' : '开启麦克风'" @click="store.toggleMicrophone"><Mic v-if="store.microphoneEnabled" /><MicOff v-else /></button><button class="icon-button" type="button" title="牌局记录" aria-label="牌局记录" @click="sidePanel = sidePanel === 'history' ? null : 'history'"><History /></button><button class="icon-button" type="button" title="牌桌设置" aria-label="牌桌设置" @click="sidePanel = sidePanel === 'settings' ? null : 'settings'"><Settings /></button><button class="icon-button" type="button" title="离开牌桌" aria-label="离开牌桌" @click="leaveTable"><ArrowLeft /></button></div>
+      <div class="table-tools"><span class="network-status" :class="{ unstable: store.connectionState !== 'connected' }"><Wifi v-if="store.connectionState === 'connected'" /><WifiOff v-else />{{ connectionLabel }}</span><button class="icon-button" type="button" :class="{ active: store.microphoneEnabled }" :disabled="store.voiceBusy" :title="store.microphoneEnabled ? '关闭麦克风' : '开启麦克风'" :aria-label="store.microphoneEnabled ? '关闭麦克风' : '开启麦克风'" @click="store.toggleMicrophone"><Mic v-if="store.microphoneEnabled" /><MicOff v-else /></button><button class="icon-button" type="button" title="牌局记录" aria-label="牌局记录" @click="sidePanel = sidePanel === 'history' ? null : 'history'"><History /></button><button class="icon-button" type="button" title="牌桌设置" aria-label="牌桌设置" @click="sidePanel = sidePanel === 'settings' ? null : 'settings'"><Settings /></button><button class="icon-button" type="button" title="离开牌桌" aria-label="离开牌桌" :disabled="store.commandPending" @click="leaveTable"><ArrowLeft /></button></div>
     </header>
 
     <SystemBroadcast :text="broadcast.text" :at="broadcast.at" />

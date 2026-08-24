@@ -389,6 +389,27 @@ test("牌桌在目标视口内保持完整且筹码不会改变布局", async ({
   await expectInsideViewport(page.getByRole("button", { name: /确认加注 20/ }), page);
 });
 
+test("牌桌行动快速双击只提交一次且不显示伪失败", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1440", "代表性桌面项目覆盖牌桌行动并发");
+  let actionCommands = 0;
+  await page.route("**/api/v1/rooms/room-saturday/commands", async (route) => {
+    const command = route.request().postDataJSON() as { type: string };
+    if (command.type === "action.call") actionCommands++;
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ duplicate: false, event: { type: "game.action_applied" } }) });
+  });
+
+  await page.goto("/rooms/room-saturday/table");
+  const call = page.getByRole("button", { name: "跟注 10" });
+  await call.evaluate((button: HTMLButtonElement) => {
+    button.click();
+    button.click();
+  });
+  await expect(call).toBeEnabled();
+  expect(actionCommands).toBe(1);
+  await expect(page.locator(".table-state-banner")).toHaveCount(0);
+});
+
 test("房间状态与当前路由不一致时会进入正确页面", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1440", "代表性桌面项目覆盖跨设备开局与陈旧路由");
 
