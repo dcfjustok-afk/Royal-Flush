@@ -36,6 +36,8 @@ feature branch
 -> Zeabur GitHub App
 -> Watch Paths
 -> 自动重建受影响服务
+-> Production smoke
+-> GitHub production 环境链接
 ```
 
 - `main` 受保护，不能直接 push，必须通过 PR。
@@ -43,6 +45,8 @@ feature branch
 - Zeabur GitHub App Installation ID: `156156046`
 - GitHub App 仅授权仓库 `dcfjustok-afk/Royal-Flush`。
 - 当前配置文件：`ZEABUR.md`、`deploy/zeabur/watch-paths/server.txt`、`deploy/zeabur/watch-paths/web.txt`、`deploy/zeabur/watch-paths/admin.txt`。
+- `Deployment gate` 还会构建三个生产 Dockerfile；Playwright 失败诊断保留 7 天。
+- Zeabur 成功状态会触发玩家端、运营端和 readiness 冒烟，并在 GitHub `production` 环境登记正确 URL。
 
 ## 运行环境变量
 
@@ -87,6 +91,8 @@ API_UPSTREAM=http://${SERVER_HOST}:8080
 - 运营端空状态不再展示假房间、假用户、假举报或假审计。
 - 运营端封禁、举报处理、房间详情在服务未配置时不会本地伪造结果。
 - 新增管理员账号密码登录后端接口、前端登录页、OpenAPI 路径和测试。
+- Playwright 使用仅存在于 `e2e/support` 的权威 API fixtures，不再依赖运行时演示数据，并覆盖管理员账号密码登录。
+- CI Action 固定到完整 commit SHA，增加三镜像构建门禁、失败诊断产物与部署后自动冒烟。
 
 未完成或需要上线前确认：
 
@@ -95,7 +101,7 @@ API_UPSTREAM=http://${SERVER_HOST}:8080
 - `LIVEKIT_*` 当前为空，语音仍是可选降级状态。
 - 本地环境未安装 Go，当前会话无法运行 `gofmt`、Go tests 和 Go contract generator；CI/Zeabur 构建环境应执行完整 Go 检查。
 - 尚未执行线上 PostgreSQL 业务数据清理；清理前必须先只读统计业务表，再精确删除测试记录，不删除 schema、migration、服务或卷。
-- 尚未 push 当前本地提交，也未触发 Zeabur 部署。
+- GitHub `production` 环境由部署后冒烟工作流维护，玩家端地址不再依赖 Zeabur 回写的空 `environment_url`。
 
 ## 原子提交建议
 

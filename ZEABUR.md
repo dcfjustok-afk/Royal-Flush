@@ -26,9 +26,12 @@ flowchart LR
   F --> G[server]
   F --> H[web]
   F --> I[admin]
+  G --> J[Production smoke]
+  H --> J
+  I --> J
 ```
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) 会执行 Go 测试与静态检查、Node 测试与构建、契约漂移检查、Playwright 流程和实时容量烟测。所有任务最终汇总为一个名为 `Deployment gate` 的检查。
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) 会执行 Go 测试与静态检查、Node 测试与构建、契约漂移检查、Playwright 流程、实时容量烟测，并真实构建三个生产 Dockerfile。所有任务最终汇总为一个名为 `Deployment gate` 的检查；Playwright 的 HTML 报告、截图、视频与 trace 会作为 7 天诊断产物上传。工作流引用的第三方 Action 固定到完整 commit SHA，降低可变标签带来的供应链风险。
 
 在 GitHub 仓库的 **Settings → Rules → Rulesets** 中为 `main` 创建规则：
 
@@ -39,6 +42,8 @@ flowchart LR
 5. 不允许管理员日常绕过该规则直接推送生产分支。
 
 Zeabur 的 GitHub 自动部署由 `main` 的 push 触发，并不会等待同一次 push 上刚启动的 GitHub Actions。因此质量门禁必须发生在 Pull Request 合并之前：CI 失败时不能进入 `main`；成功合并后，进入 `main` 的提交已经通过完整检查，Zeabur 才开始部署。
+
+Zeabur 回写成功的 `deployment_status` 后，[`.github/workflows/production-smoke.yml`](.github/workflows/production-smoke.yml) 会串联验证 `https://royal-flush.zeabur.app/`、`/api/v1/ready` 与 `https://royal-flush-admin.zeabur.app/`。同一时间只保留最新一次生产冒烟；它还会创建带正确玩家端 URL 的 GitHub `production` 环境记录，修正 Zeabur 原始状态中空 `environment_url` 导致的不可点击问题。该工作流也支持手动触发。
 
 ## 先处理当前构建预览
 
@@ -174,6 +179,7 @@ LIVEKIT_API_SECRET=你的-api-secret
 7. 配置 LiveKit Cloud 后，再验证麦克风授权、设备切换、房主禁言和语音断线降级。
 8. 合并一个只修改 `apps/web` 的测试 Pull Request，确认 CI 的 `Deployment gate` 通过后只有 `web` 产生新部署。
 9. 在 Zeabur 部署记录中确认 commit SHA 与 GitHub `main` 最新提交一致。
+10. 在 GitHub Actions 中确认 `Production smoke / Verify production` 通过，并可从 `production` 环境直接打开玩家端。
 
 ## 变量检查表
 
