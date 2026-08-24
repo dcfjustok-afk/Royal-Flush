@@ -14,6 +14,7 @@ defineProps<{ player?: PlayerSnapshot; seat: number }>();
         <span class="seat-name">{{ player.name }}<b v-if="player.isDealer" class="dealer-button">D</b></span>
         <VoiceMeter v-if="player.isSpeaking" active :label="`${player.name}正在说话`" />
         <WifiOff v-else-if="player.status === 'disconnected'" class="seat-state-icon" aria-label="已断线" />
+        <MicOff v-else-if="player.isMuted" class="seat-state-icon" aria-label="已禁言" />
         <MicOff v-else-if="player.status === 'away'" class="seat-state-icon" aria-label="已暂离" />
         <Radio v-else class="seat-state-icon" aria-hidden="true" />
       </header>
@@ -26,4 +27,3 @@ defineProps<{ player?: PlayerSnapshot; seat: number }>();
     </template>
   </article>
 </template>
-

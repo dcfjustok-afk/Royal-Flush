@@ -3,6 +3,17 @@ import type { RoomConfig, RoomEvent, ScoreAdditionRequest, ScoreLedgerEntry, Sco
 const baseUrl = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
 export const apiMode = import.meta.env.VITE_USE_API === "true";
 
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${baseUrl}${path}`, {
     credentials: "include",
@@ -11,8 +22,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
-    const problem = (await response.json().catch(() => null)) as { message?: string } | null;
-    throw new Error(problem?.message ?? `请求失败 (${response.status})`);
+    const problem = (await response.json().catch(() => null)) as { code?: string; message?: string } | null;
+    throw new ApiError(problem?.message ?? `请求失败 (${response.status})`, response.status, problem?.code ?? "request_failed");
   }
   return response.json() as Promise<T>;
 }

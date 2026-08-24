@@ -13,6 +13,7 @@ export const demoSnapshot: TableSnapshot = {
   roomId: "room-saturday",
   roomCode: "RF-2806",
   roomName: "周六夜场",
+  ownerId: "me",
   version: 28,
   handNumber: 28,
   street: "river",
@@ -29,8 +30,8 @@ export const demoSnapshot: TableSnapshot = {
     { rank: "Q", suit: "hearts" },
   ],
   players: [
-    { id: "p1", name: "阿桥", initials: "桥", seat: 0, tablePoints: 1240, accountPoints: 3680, streetCommitted: 10, status: "active", isDealer: false, isSpeaking: true, isCurrentActor: false, isLocal: false },
-    { id: "p2", name: "许栗", initials: "栗", seat: 1, tablePoints: 835, accountPoints: 920, streetCommitted: 10, status: "active", isDealer: true, isSpeaking: false, isCurrentActor: false, isLocal: false },
+    { id: "p1", name: "阿桥", initials: "桥", seat: 0, tablePoints: 1240, accountPoints: 3680, streetCommitted: 10, status: "active", isDealer: false, isSpeaking: true, isCurrentActor: false, isLocal: false, isReady: true },
+    { id: "p2", name: "许栗", initials: "栗", seat: 1, tablePoints: 835, accountPoints: 920, streetCommitted: 10, status: "active", isDealer: true, isSpeaking: false, isCurrentActor: false, isLocal: false, isReady: true },
     { id: "p3", name: "小北", initials: "北", seat: 2, tablePoints: 1090, accountPoints: 1240, streetCommitted: 10, status: "active", isDealer: false, isSpeaking: false, isCurrentActor: false, isLocal: false },
     { id: "p4", name: "远山", initials: "山", seat: 3, tablePoints: 680, accountPoints: -240, streetCommitted: 10, status: "active", isDealer: false, isSpeaking: false, isCurrentActor: false, isLocal: false },
     { id: "p5", name: "林度", initials: "林", seat: 6, tablePoints: 755, accountPoints: 610, streetCommitted: 10, status: "active", isDealer: false, isSpeaking: false, isCurrentActor: false, isLocal: false },
@@ -60,4 +61,3 @@ export const demoMessages = [
   { id: "m2", type: "action", text: "阿桥加注 70，本轮总投入 80", at: "22:47:52" },
   { id: "m3", type: "system", text: "第 28 手牌开始，盲注 5 / 10", at: "22:46:34" },
 ];
-
