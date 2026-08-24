@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ChipDenomination } from "@royal-flush/contracts";
 import { ArrowLeft, Clock3, Copy, History, Mic, MicOff, PanelRightClose, Play, Radio, RefreshCw, Settings, Signal, Users, Wifi, WifiOff } from "@lucide/vue";
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import BrandMark from "@/components/BrandMark.vue";
 import ChipComposer from "@/components/ChipComposer.vue";
@@ -13,7 +13,7 @@ import RoomManagementPanel from "@/components/RoomManagementPanel.vue";
 import ScoreAddPanel from "@/components/ScoreAddPanel.vue";
 import SystemBroadcast from "@/components/SystemBroadcast.vue";
 import VoiceMeter from "@/components/VoiceMeter.vue";
-import { apiMode } from "@/lib/api";
+import { ApiError, apiMode } from "@/lib/api";
 import { useGameStore } from "@/stores/game";
 
 const store = useGameStore();
@@ -39,6 +39,12 @@ const canStartNextHand = computed(() => handSettled.value && isOwner.value && re
 const canAct = computed(() => acting.value && !store.commandPending && store.connectionState === "connected");
 const connectionLabel = computed(() => ({ offline: "实时连接离线", connecting: "正在连接牌桌", connected: "连接稳定", reconnecting: "正在恢复牌桌" })[store.connectionState]);
 const voiceConnectionLabel = computed(() => store.voiceConnected ? (store.voiceTransport === "livekit" ? "云端语音已连接" : "直连语音已连接") : "语音未连接");
+
+watch(() => [store.snapshot.roomId, store.snapshot.street] as const, ([roomId, street]) => {
+  if (street === "waiting" && roomId === String(route.params.id) && route.name === "table") {
+    void router.replace(`/rooms/${roomId}/waiting`);
+  }
+});
 
 function playerForSeat(seat: number) {
   return store.snapshot.players.find((player) => player.seat === seat);
@@ -68,10 +74,13 @@ async function retryConnection() {
     tableError.value = "后端服务暂时不可用，请稍后重试";
     return;
   }
-  await store.loadRoom(String(route.params.id)).catch((reason) => {
+  try {
+    const snapshot = await store.loadRoom(String(route.params.id));
+    store.connectRoomEvents(snapshot.roomId);
+  } catch (reason) {
+    if (await redirectAfterUnavailableRoom(reason)) return;
     tableError.value = reason instanceof Error ? reason.message : "无法恢复牌桌";
-  });
-  store.connectRoomEvents(store.snapshot.roomId);
+  }
 }
 
 async function leaveTable() {
@@ -99,14 +108,40 @@ function selectMicrophone(event: Event) {
   void store.selectMicrophone((event.target as HTMLSelectElement).value);
 }
 
+async function redirectAfterUnavailableRoom(reason: unknown) {
+  const recoverable = reason instanceof ApiError && (
+    reason.status === 401 ||
+    reason.status === 404 ||
+    reason.status === 410 ||
+    ["player_not_seated", "room_not_found", "room_closed"].includes(reason.code)
+  );
+  if (!recoverable) return false;
+
+  store.disconnectRoomEvents();
+  try {
+    await store.refreshAccount();
+  } catch {
+    return false;
+  }
+  if (!store.currentUser) {
+    await router.replace({ name: "account", query: { redirect: route.fullPath } });
+  } else {
+    await router.replace(store.activeRoomRoute());
+  }
+  return true;
+}
+
 onMounted(async () => {
   timer = window.setInterval(() => (now.value = Date.now()), 250);
   await store.probeBackend();
   if (store.backendOnline) {
-    await store.loadRoom(String(route.params.id)).catch((reason) => {
+    try {
+      const snapshot = await store.loadRoom(String(route.params.id));
+      store.connectRoomEvents(snapshot.roomId);
+    } catch (reason) {
+      if (await redirectAfterUnavailableRoom(reason)) return;
       tableError.value = reason instanceof Error ? reason.message : "无法读取牌桌";
-    });
-    store.connectRoomEvents(store.snapshot.roomId);
+    }
   }
 });
 onBeforeUnmount(() => {

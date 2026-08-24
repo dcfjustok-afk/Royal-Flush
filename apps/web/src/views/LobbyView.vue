@@ -26,8 +26,8 @@ async function copyCode() {
   if (store.snapshot.roomCode) await navigator.clipboard.writeText(store.snapshot.roomCode).catch(() => undefined);
 }
 
-const hasActiveRoom = computed(() => Boolean(store.activeRoomId && store.snapshot.roomId));
-const activeRoomRoute = computed(() => store.snapshot.street === "waiting" ? `/rooms/${store.snapshot.roomId}/waiting` : `/rooms/${store.snapshot.roomId}/table`);
+const hasActiveRoom = computed(() => Boolean(store.activeRoomId && store.snapshot.roomId === store.activeRoomId && store.localPlayer));
+const activeRoomRoute = computed(() => store.activeRoomRoute());
 const activeRoomStatus = computed(() => store.snapshot.street === "waiting" ? "等待玩家准备" : store.snapshot.street === "settled" ? "等待下一手" : "牌局进行中");
 const activeRoomAction = computed(() => store.snapshot.street === "waiting" ? "返回等候室" : "返回牌桌");
 

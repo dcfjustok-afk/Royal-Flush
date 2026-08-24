@@ -64,12 +64,14 @@ export const useGameStore = defineStore("game", () => {
 
   async function refreshAccount() {
     if (!apiMode || !backendOnline.value) return;
+    const scoreLedgerRequest = api.scoreLedger().catch(() => null);
     try {
-      const [me, scoreLedger] = await Promise.all([api.me(), api.scoreLedger()]);
+      const me = await api.me();
       currentUser.value = me.user;
       accountPoints.value = me.balance;
       activeRoomId.value = me.activeRoomId ?? "";
-      ledger.value = scoreLedger.entries;
+      const scoreLedger = await scoreLedgerRequest;
+      if (scoreLedger) ledger.value = scoreLedger.entries;
       if (me.activeRoomId) await loadRoom(me.activeRoomId).catch(() => undefined);
     } catch (reason) {
       if (reason instanceof ApiError && reason.status === 401) {
@@ -83,6 +85,7 @@ export const useGameStore = defineStore("game", () => {
   function acceptSnapshot(next: TableSnapshot) {
     snapshot.value = structuredClone(next);
     roomConfig.value = structuredClone(next.config ?? { ...roomConfig.value, name: next.roomName, chipDenominations: [...next.allowedChipDenominations] });
+    connectionError.value = "";
     if (next.messages) {
       messages.value = next.messages.map((message) => ({
         id: message.id,
@@ -93,6 +96,7 @@ export const useGameStore = defineStore("game", () => {
     }
     const me = next.players.find((player) => player.isLocal);
     if (me) {
+      activeRoomId.value = next.roomId;
       accountPoints.value = me.accountPoints;
       currentUser.value = currentUser.value
         ? { ...currentUser.value, id: me.id, nickname: me.name }
@@ -126,7 +130,9 @@ export const useGameStore = defineStore("game", () => {
   }
 
   async function joinRoom(idOrCode: string, seat: number) {
+    const previousRoomId = snapshot.value.roomId;
     const next = await api.joinRoom(idOrCode, seat);
+    if (previousRoomId && previousRoomId !== next.roomId) disconnectRoomEvents();
     acceptSnapshot(next);
     backendOnline.value = true;
     return next;
@@ -143,7 +149,16 @@ export const useGameStore = defineStore("game", () => {
     try {
       requireBackend();
       const result = await api.roomCommand(roomId, { type, payload, expectedVersion: snapshot.value.version, requestId: crypto.randomUUID() });
-      if (type !== "room.leave" && type !== "room.end") await loadRoom(roomId);
+      if (type !== "room.leave" && type !== "room.end") {
+        try {
+          await loadRoom(roomId);
+        } catch {
+          if (type === "room.ready" && typeof payload.ready === "boolean" && localPlayer.value) {
+            localPlayer.value.isReady = payload.ready;
+          }
+          connectionError.value = "操作已提交，正在恢复最新牌桌状态";
+        }
+      }
       return result.event;
     } catch (reason) {
       if (reason instanceof ApiError && reason.code === "version_conflict") {
@@ -158,6 +173,7 @@ export const useGameStore = defineStore("game", () => {
 
   function connectRoomEvents(roomId: string) {
     if (!apiMode || !backendOnline.value) return;
+    if (eventSocket && eventRoomId !== roomId) disconnectRoomEvents();
     shouldReconnect = true;
     eventRoomId = roomId;
     if (eventSocket && (eventSocket.readyState === WebSocket.OPEN || eventSocket.readyState === WebSocket.CONNECTING)) return;
@@ -242,6 +258,19 @@ export const useGameStore = defineStore("game", () => {
     socket?.close();
     connectionState.value = "offline";
     voice.disconnect();
+    microphoneEnabled.value = false;
+    activeSpeakerId.value = null;
+    voiceConnected.value = false;
+    voiceTransport.value = null;
+    for (const player of snapshot.value.players) player.isSpeaking = false;
+  }
+
+  function activeRoomRoute() {
+    const roomId = activeRoomId.value;
+    if (!roomId || snapshot.value.roomId !== roomId || !localPlayer.value) return "/";
+    return snapshot.value.street === "waiting"
+      ? `/rooms/${roomId}/waiting`
+      : `/rooms/${roomId}/table`;
   }
 
   async function addAccountPoints(amount: number) {
@@ -379,7 +408,7 @@ export const useGameStore = defineStore("game", () => {
   return {
     accountPoints, currentUser, activeRoomId, ledger, roomConfig, snapshot, messages, microphoneEnabled, voiceConnected, voiceTransport, voiceError, activeSpeakerId, microphones, selectedMicrophoneId, voiceBusy,
     backendOnline, connectionState, connectionError, roomLoading, commandPending,
-    localPlayer, activePlayers, probeBackend, refreshAccount, acceptSnapshot, createRoom, loadRoom, joinRoom, sendCommand, connectRoomEvents, disconnectRoomEvents,
+    localPlayer, activePlayers, probeBackend, refreshAccount, activeRoomRoute, acceptSnapshot, createRoom, loadRoom, joinRoom, sendCommand, connectRoomEvents, disconnectRoomEvents,
     addAccountPoints, updateRoomConfig, toggleMicrophone, refreshMicrophones, selectMicrophone, registerAccount, loginAccount, updateNickname, logoutAccount, raise, call, fold, allIn,
   };
 });

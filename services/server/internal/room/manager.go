@@ -3,9 +3,11 @@ package room
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
+	"github.com/royal-flush/royal-flush/services/server/internal/idgen"
 	"github.com/royal-flush/royal-flush/services/server/internal/score"
 )
 
@@ -16,6 +18,7 @@ var (
 
 type Manager struct {
 	mu             sync.RWMutex
+	transitionMu   sync.Mutex
 	scores         AccountScores
 	store          Store
 	lease          Lease
@@ -210,11 +213,10 @@ func (m *Manager) Restore(ctx context.Context) error {
 }
 
 func (m *Manager) Join(ctx context.Context, roomID string, identity Identity, seat int) (TableSnapshot, error) {
+	m.transitionMu.Lock()
+	defer m.transitionMu.Unlock()
 	m.mu.Lock()
-	if existing := m.activeSeat[identity.ID]; existing != "" && existing != roomID {
-		m.mu.Unlock()
-		return TableSnapshot{}, ErrAlreadySeated
-	}
+	existingRoomID := m.activeSeat[identity.ID]
 	actor := m.rooms[roomID]
 	if actor == nil {
 		actor = m.byCode[roomID]
@@ -223,12 +225,53 @@ func (m *Manager) Join(ctx context.Context, roomID string, identity Identity, se
 		m.mu.Unlock()
 		return TableSnapshot{}, errors.New("room not found")
 	}
-	m.cancelEmptyTimer(actor.ID)
-	if m.activeSeat[identity.ID] == actor.ID {
+	if existingRoomID == actor.ID {
 		m.mu.Unlock()
 		return actor.Snapshot(ctx, identity.ID)
 	}
+	var current *Actor
+	if existingRoomID != "" {
+		current = m.rooms[existingRoomID]
+	}
+	m.mu.Unlock()
+	if current != nil {
+		previousSeat, err := current.SeatForImmediateSwitch(ctx, identity.ID)
+		if err != nil {
+			return TableSnapshot{}, err
+		}
+		if err := actor.ReserveSeatForSwitch(ctx, identity.ID, seat); err != nil {
+			return TableSnapshot{}, err
+		}
+		defer actor.ReleaseSeatReservation(identity.ID, seat)
+		requestID, err := idgen.ID("switch")
+		if err != nil {
+			return TableSnapshot{}, err
+		}
+		if _, _, err := current.Handle(ctx, identity.ID, ClientCommand{Type: "room.leave", RequestID: requestID}); err != nil {
+			return TableSnapshot{}, err
+		}
+		m.mu.Lock()
+		m.activeSeat[identity.ID] = actor.ID
+		m.cancelEmptyTimer(actor.ID)
+		m.mu.Unlock()
+		snapshot, err := actor.Join(ctx, identity, seat)
+		if err == nil {
+			return snapshot, nil
+		}
+		m.releaseSeat(identity.ID)
+		m.mu.Lock()
+		m.activeSeat[identity.ID] = current.ID
+		m.cancelEmptyTimer(current.ID)
+		m.mu.Unlock()
+		if _, restoreErr := current.Join(ctx, identity, previousSeat); restoreErr != nil {
+			m.releaseSeat(identity.ID)
+			return TableSnapshot{}, fmt.Errorf("join target room: %w; restore previous room: %v", err, restoreErr)
+		}
+		return TableSnapshot{}, err
+	}
+	m.mu.Lock()
 	m.activeSeat[identity.ID] = actor.ID
+	m.cancelEmptyTimer(actor.ID)
 	m.mu.Unlock()
 	snapshot, err := actor.Join(ctx, identity, seat)
 	if err != nil {

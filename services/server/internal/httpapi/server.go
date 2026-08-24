@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/royal-flush/royal-flush/services/server/internal/auth"
+	"github.com/royal-flush/royal-flush/services/server/internal/chips"
 	"github.com/royal-flush/royal-flush/services/server/internal/operations"
 	"github.com/royal-flush/royal-flush/services/server/internal/poker"
 	"github.com/royal-flush/royal-flush/services/server/internal/room"
@@ -247,39 +248,70 @@ func writeProblem(writer http.ResponseWriter, status int, code, message string) 
 }
 
 func writeDomainError(writer http.ResponseWriter, err error) {
-	status := http.StatusBadRequest
-	code := "invalid_request"
+	status, code, message := domainErrorProblem(err)
+	if status == http.StatusInternalServerError {
+		slog.Error("unhandled API domain error", "error", err)
+	}
+	writeProblem(writer, status, code, message)
+}
+
+func domainErrorProblem(err error) (int, string, string) {
+	status := http.StatusInternalServerError
+	code := "internal_error"
+	message := "服务暂时无法完成该操作，请稍后重试"
 	switch {
 	case errors.Is(err, room.ErrRoomClosed):
-		status, code = http.StatusGone, "room_closed"
+		status, code, message = http.StatusGone, "room_closed", "房间已经结束"
 	case errors.Is(err, room.ErrForbidden):
-		status, code = http.StatusForbidden, "forbidden"
+		status, code, message = http.StatusForbidden, "forbidden", "你没有权限执行这个操作"
 	case errors.Is(err, room.ErrCannotRemoveOwner):
-		status, code = http.StatusBadRequest, "cannot_remove_owner"
+		status, code, message = http.StatusBadRequest, "cannot_remove_owner", "房主不能将自己移出房间"
 	case errors.Is(err, room.ErrVersionConflict):
-		status, code = http.StatusConflict, "version_conflict"
+		status, code, message = http.StatusConflict, "version_conflict", "牌桌状态已经变化，请重试"
 	case errors.Is(err, room.ErrPlayerNotSeated):
-		status, code = http.StatusNotFound, "player_not_seated"
+		status, code, message = http.StatusNotFound, "player_not_seated", "你不在这个房间中"
+	case errors.Is(err, room.ErrRoomSwitchInHand):
+		status, code, message = http.StatusConflict, "room_switch_in_hand", room.ErrRoomSwitchInHand.Error()
+	case errors.Is(err, room.ErrRoomTransition):
+		status, code, message = http.StatusConflict, "room_transition", "房间成员正在变更，请稍后重试"
 	case errors.Is(err, room.ErrAlreadySeated), errors.Is(err, poker.ErrSeatOccupied), errors.Is(err, poker.ErrPlayerSeated):
-		status, code = http.StatusConflict, "seat_conflict"
+		status, code, message = http.StatusConflict, "seat_conflict", "该座位已经被占用"
+	case errors.Is(err, room.ErrPlayersNotReady):
+		status, code, message = http.StatusBadRequest, "players_not_ready", "至少需要两名在线玩家准备"
+	case errors.Is(err, room.ErrInvalidQuickMessage):
+		status, code, message = http.StatusBadRequest, "invalid_quick_message", "不支持这条快捷消息"
+	case errors.Is(err, poker.ErrNotEnoughPlayers):
+		status, code, message = http.StatusBadRequest, "not_enough_players", "至少需要两名可用玩家"
+	case errors.Is(err, poker.ErrHandInProgress):
+		status, code, message = http.StatusConflict, "hand_in_progress", "当前手牌仍在进行中"
+	case errors.Is(err, poker.ErrNotPlayersTurn), errors.Is(err, poker.ErrIllegalAction):
+		status, code, message = http.StatusBadRequest, "illegal_action", "当前牌局状态不允许这个操作"
+	case errors.Is(err, chips.ErrInvalidChip), errors.Is(err, chips.ErrRaiseTooSmall), errors.Is(err, chips.ErrRaiseTooLarge), errors.Is(err, chips.ErrEmptyChipList), errors.Is(err, chips.ErrChipSumOverflow):
+		status, code, message = http.StatusBadRequest, "invalid_chips", "筹码组合不符合当前牌局规则"
 	case errors.Is(err, score.ErrRateLimited):
-		status, code = http.StatusTooManyRequests, "score_rate_limited"
+		status, code, message = http.StatusTooManyRequests, "score_rate_limited", "增加积分过于频繁，请稍后重试"
+	case errors.Is(err, score.ErrInvalidAmount):
+		status, code, message = http.StatusBadRequest, "invalid_score_amount", "积分数量必须是 1 到 1,000,000,000 之间的整数"
+	case errors.Is(err, score.ErrRequestID), errors.Is(err, score.ErrSessionID):
+		status, code, message = http.StatusBadRequest, "invalid_request_id", "请求标识不正确"
 	case errors.Is(err, auth.ErrInvalidCode):
-		status, code = http.StatusUnauthorized, "invalid_otp"
+		status, code, message = http.StatusUnauthorized, "invalid_otp", auth.ErrInvalidCode.Error()
 	case errors.Is(err, auth.ErrInvalidCredentials):
-		status, code = http.StatusUnauthorized, "invalid_credentials"
+		status, code, message = http.StatusUnauthorized, "invalid_credentials", auth.ErrInvalidCredentials.Error()
 	case errors.Is(err, auth.ErrOTPUnavailable):
-		status, code = http.StatusServiceUnavailable, "otp_unavailable"
+		status, code, message = http.StatusServiceUnavailable, "otp_unavailable", auth.ErrOTPUnavailable.Error()
 	case errors.Is(err, auth.ErrAccountBanned):
-		status, code = http.StatusForbidden, "account_banned"
+		status, code, message = http.StatusForbidden, "account_banned", auth.ErrAccountBanned.Error()
 	case errors.Is(err, auth.ErrPhoneRegistered):
-		status, code = http.StatusConflict, "phone_registered"
+		status, code, message = http.StatusConflict, "phone_registered", auth.ErrPhoneRegistered.Error()
 	case errors.Is(err, auth.ErrInvalidPhone), errors.Is(err, auth.ErrWeakPassword), errors.Is(err, auth.ErrInvalidNickname):
-		status, code = http.StatusBadRequest, "invalid_account"
+		status, code, message = http.StatusBadRequest, "invalid_account", err.Error()
 	case errors.Is(err, operations.ErrUserNotFound), errors.Is(err, operations.ErrReportNotFound):
-		status, code = http.StatusNotFound, "not_found"
+		status, code, message = http.StatusNotFound, "not_found", "目标记录不存在"
 	case errors.Is(err, operations.ErrReasonRequired), errors.Is(err, operations.ErrInvalidStatus):
-		status, code = http.StatusBadRequest, "invalid_operation"
+		status, code, message = http.StatusBadRequest, "invalid_operation", "操作参数不正确"
+	case errors.Is(err, room.ErrRoomLeaseUnavailable), errors.Is(err, room.ErrLeaseNotOwned):
+		status, code, message = http.StatusServiceUnavailable, "room_temporarily_unavailable", "房间正在恢复，请稍后重试"
 	}
-	writeProblem(writer, status, code, err.Error())
+	return status, code, message
 }

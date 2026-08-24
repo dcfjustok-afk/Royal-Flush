@@ -572,6 +572,179 @@ func TestRaiseValidationVersionAndIdempotency(t *testing.T) {
 	}
 }
 
+func TestProcessedCommandKeysRemainValidPostgresJSON(t *testing.T) {
+	ctx := context.Background()
+	actor, err := NewActor(testConfig(), Identity{ID: "user-one", Name: "房主"}, score.NewService(nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer actor.Close()
+	payload := json.RawMessage(`{"ready":true}`)
+	command := ClientCommand{Type: "room.ready", RequestID: "ready-request", Payload: payload}
+	event, duplicate, err := actor.Handle(ctx, "user-one", command)
+	if err != nil || duplicate {
+		t.Fatalf("first command failed: event=%#v duplicate=%v err=%v", event, duplicate, err)
+	}
+	retry, duplicate, err := actor.Handle(ctx, "user-one", command)
+	if err != nil || !duplicate || retry.Version != event.Version {
+		t.Fatalf("encoded idempotency key lost duplicate detection: event=%#v duplicate=%v err=%v", retry, duplicate, err)
+	}
+	if err := actor.BroadcastScoreAddition(ctx, "user-one", "score-request", 10, 1010); err != nil {
+		t.Fatal(err)
+	}
+	state, err := actor.PersistentState(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `\u0000`) {
+		t.Fatalf("persisted state still contains a PostgreSQL-incompatible Unicode escape: %s", raw)
+	}
+	if strings.ContainsRune(processedKey("command", "user\x00one", "request\x00one"), '\x00') {
+		t.Fatal("encoded idempotency key retained a control character")
+	}
+}
+
+func TestCommandRejectsControlCharactersInRequestID(t *testing.T) {
+	actor, err := NewActor(testConfig(), Identity{ID: "owner", Name: "房主"}, score.NewService(nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer actor.Close()
+	before, err := actor.Snapshot(context.Background(), "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload, _ := json.Marshal(map[string]any{"ready": true})
+	_, _, err = actor.Handle(context.Background(), "owner", ClientCommand{Type: "room.ready", RequestID: "ready\x00request", Payload: payload})
+	if !errors.Is(err, score.ErrRequestID) {
+		t.Fatalf("Handle error = %v, want score.ErrRequestID", err)
+	}
+	after, err := actor.Snapshot(context.Background(), "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Version != before.Version || after.Players[0].IsReady != before.Players[0].IsReady {
+		t.Fatalf("invalid request id changed room: before=%+v after=%+v", before, after)
+	}
+}
+
+func TestCommandPersistenceFailureRestoresActorState(t *testing.T) {
+	ctx := context.Background()
+	actor, err := NewActor(testConfig(), Identity{ID: "owner", Name: "房主"}, score.NewService(nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer actor.Close()
+	before, err := actor.Snapshot(ctx, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	persistErr := errors.New("database unavailable")
+	actor.onEvent = func(string, Envelope, PersistentState) error { return persistErr }
+	payload := json.RawMessage(`{"ready":true}`)
+	_, _, err = actor.Handle(ctx, "owner", ClientCommand{Type: "room.ready", RequestID: "ready-fails", Payload: payload})
+	if !errors.Is(err, persistErr) {
+		t.Fatalf("expected persistence error, got %v", err)
+	}
+	afterFailure, err := actor.Snapshot(ctx, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterFailure.Version != before.Version || localPlayer(afterFailure).IsReady {
+		t.Fatalf("failed command leaked into actor state: before=%#v after=%#v", before, afterFailure)
+	}
+	state, err := actor.PersistentState(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Processed) != 0 {
+		t.Fatalf("failed command retained idempotency state: %#v", state.Processed)
+	}
+	actor.onEvent = nil
+	if _, duplicate, err := actor.Handle(ctx, "owner", ClientCommand{Type: "room.ready", RequestID: "ready-fails", Payload: payload}); err != nil || duplicate {
+		t.Fatalf("retry after rollback failed: duplicate=%v err=%v", duplicate, err)
+	}
+	afterRetry, err := actor.Snapshot(ctx, "owner")
+	if err != nil || afterRetry.Version != before.Version+1 || !localPlayer(afterRetry).IsReady {
+		t.Fatalf("retry did not apply exactly once: snapshot=%#v err=%v", afterRetry, err)
+	}
+}
+
+func TestManagerSwitchesWaitingRoomsAndPreservesCurrentRoomOnTargetFailure(t *testing.T) {
+	ctx := context.Background()
+	manager := NewManager(score.NewService(nil))
+	first, err := manager.Create(ctx, testConfig(), Identity{ID: "switcher", Name: "换桌玩家"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	second, err := manager.Create(ctx, testConfig(), Identity{ID: "owner-b", Name: "房主 B"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	if _, err := manager.Join(ctx, second.ID, Identity{ID: "occupied", Name: "占座玩家"}, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Join(ctx, second.ID, Identity{ID: "switcher", Name: "换桌玩家"}, 1); !errors.Is(err, poker.ErrSeatOccupied) {
+		t.Fatalf("expected occupied target rejection, got %v", err)
+	}
+	if manager.ActiveRoom("switcher") != first.ID {
+		t.Fatalf("failed target switch removed current membership: %q", manager.ActiveRoom("switcher"))
+	}
+	if _, err := first.Snapshot(ctx, "switcher"); err != nil {
+		t.Fatalf("failed target switch removed player from current room: %v", err)
+	}
+	snapshot, err := manager.Join(ctx, second.ID, Identity{ID: "switcher", Name: "换桌玩家"}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.RoomID != second.ID || manager.ActiveRoom("switcher") != second.ID {
+		t.Fatalf("room switch did not select target: snapshot=%q active=%q", snapshot.RoomID, manager.ActiveRoom("switcher"))
+	}
+	if _, err := first.Snapshot(ctx, "switcher"); !errors.Is(err, ErrPlayerNotSeated) {
+		t.Fatalf("room switch retained previous seat: %v", err)
+	}
+}
+
+func TestManagerDoesNotSwitchRoomsDuringAnActiveHand(t *testing.T) {
+	ctx := context.Background()
+	manager := NewManager(score.NewService(nil))
+	first, err := manager.Create(ctx, testConfig(), Identity{ID: "switcher", Name: "换桌玩家"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	if _, err := manager.Join(ctx, first.ID, Identity{ID: "player-two", Name: "玩家二"}, 1); err != nil {
+		t.Fatal(err)
+	}
+	ready := json.RawMessage(`{"ready":true}`)
+	for _, userID := range []string{"switcher", "player-two"} {
+		if _, _, err := first.Handle(ctx, userID, ClientCommand{Type: "room.ready", RequestID: "ready-" + userID, Payload: ready}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := first.Handle(ctx, "switcher", ClientCommand{Type: "game.start", RequestID: "start"}); err != nil {
+		t.Fatal(err)
+	}
+	second, err := manager.Create(ctx, testConfig(), Identity{ID: "owner-b", Name: "房主 B"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	if _, err := manager.Join(ctx, second.ID, Identity{ID: "switcher", Name: "换桌玩家"}, 1); !errors.Is(err, ErrRoomSwitchInHand) {
+		t.Fatalf("expected active-hand switch rejection, got %v", err)
+	}
+	if manager.ActiveRoom("switcher") != first.ID {
+		t.Fatalf("active-hand rejection changed membership: %q", manager.ActiveRoom("switcher"))
+	}
+}
+
 func TestRoomActivityDoesNotPostponeTheActionDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()

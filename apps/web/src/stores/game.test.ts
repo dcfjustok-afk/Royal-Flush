@@ -39,4 +39,23 @@ describe("game store realtime recovery", () => {
     expect(store.messages[0]).toMatchObject({ id: "message-live", type: "score" });
     expect(store.messages[0]!.text).toContain("当前局外积分为 1920");
   });
+
+  it("records the authoritative active room and clears stale connection errors", () => {
+	const store = useGameStore();
+	store.connectionError = "你已离开或被移出这个房间";
+	store.acceptSnapshot({
+	  ...structuredClone(emptySnapshot),
+	  roomId: "room-target",
+	  roomCode: "RF-TARG",
+	  roomName: "目标房间",
+	  players: [{
+		id: "me", name: "你", initials: "你", seat: 1, tablePoints: 1000, accountPoints: 1000,
+		streetCommitted: 0, status: "active", isDealer: false, isSpeaking: false,
+		isCurrentActor: false, isLocal: true, isReady: false, isMuted: false,
+	  }],
+	});
+
+	expect(store.activeRoomId).toBe("room-target");
+	expect(store.connectionError).toBe("");
+  });
 });

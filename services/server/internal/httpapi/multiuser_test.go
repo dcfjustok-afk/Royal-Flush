@@ -1,10 +1,15 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 	"github.com/royal-flush/royal-flush/services/server/internal/room"
 )
 
@@ -146,6 +151,111 @@ func TestMultiUserAccountRoomAndHandMatrix(t *testing.T) {
 	response = request(t, client, http.MethodPost, server.URL+"/api/v1/rooms", roomBody, second.Headers)
 	if response.StatusCode != http.StatusCreated {
 		t.Fatalf("player could not create a room after leaving: %d: %s", response.StatusCode, readBody(response))
+	}
+	response.Body.Close()
+}
+
+func TestJoiningAnotherRoomSwitchesMembershipAtomically(t *testing.T) {
+	application := New(Config{Development: false}, nil)
+	t.Cleanup(application.Close)
+	server := httptest.NewServer(application.Handler())
+	defer server.Close()
+	client := server.Client()
+	switcher := registerMatrixAccount(t, client, server.URL, "13800138201", "换桌玩家")
+	secondOwner := registerMatrixAccount(t, client, server.URL, "13800138202", "二桌房主")
+	fullOwner := registerMatrixAccount(t, client, server.URL, "13800138203", "满桌房主")
+	fullPlayer := registerMatrixAccount(t, client, server.URL, "13800138204", "满桌玩家")
+	roomBody := map[string]any{
+		"name": "切换矩阵", "maxPlayers": 2, "blindPreset": "5/10", "actionSeconds": 20,
+		"voiceEnabled": true, "chipDenominations": []int{5, 10, 20, 50, 100},
+	}
+	create := func(account matrixAccount) string {
+		t.Helper()
+		response := request(t, client, http.MethodPost, server.URL+"/api/v1/rooms", roomBody, account.Headers)
+		var created struct {
+			ID string `json:"id"`
+		}
+		decodeResponse(t, response, &created)
+		return created.ID
+	}
+	firstRoomID := create(switcher)
+	secondRoomID := create(secondOwner)
+	fullRoomID := create(fullOwner)
+	response := request(t, client, http.MethodPost, server.URL+"/api/v1/rooms/"+fullRoomID+"/join", map[string]any{"seat": 1}, fullPlayer.Headers)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("fill target room status = %d: %s", response.StatusCode, readBody(response))
+	}
+	response.Body.Close()
+	response = request(t, client, http.MethodPost, server.URL+"/api/v1/rooms/"+fullRoomID+"/join", map[string]any{"seat": 1}, switcher.Headers)
+	if response.StatusCode != http.StatusConflict {
+		t.Fatalf("full target switch status = %d: %s", response.StatusCode, readBody(response))
+	}
+	response.Body.Close()
+	response = request(t, client, http.MethodGet, server.URL+"/api/v1/rooms/"+firstRoomID+"/snapshot", nil, switcher.Headers)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("failed switch did not preserve current room: %d: %s", response.StatusCode, readBody(response))
+	}
+	response.Body.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	baseWSURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/v1/rooms/" + firstRoomID
+	switcherHeaders := http.Header{"Cookie": []string{switcher.Cookie.String()}}
+	connections := make(map[string]*websocket.Conn)
+	for _, name := range []string{"room-tab-one", "room-tab-two"} {
+		connection, _, err := websocket.Dial(ctx, baseWSURL+"/events", &websocket.DialOptions{HTTPHeader: switcherHeaders})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer connection.CloseNow()
+		var initial room.Envelope
+		if err := wsjson.Read(ctx, connection, &initial); err != nil || initial.Type != "table.snapshot" {
+			t.Fatalf("%s initial event = %#v, err = %v", name, initial, err)
+		}
+		connections[name] = connection
+	}
+	voiceConnection, _, err := websocket.Dial(ctx, baseWSURL+"/voice-events", &websocket.DialOptions{HTTPHeader: switcherHeaders})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer voiceConnection.CloseNow()
+	var voiceInitial voiceServerEvent
+	if err := wsjson.Read(ctx, voiceConnection, &voiceInitial); err != nil || voiceInitial.Type != "voice.peers" {
+		t.Fatalf("voice initial event = %#v, err = %v", voiceInitial, err)
+	}
+	connections["voice"] = voiceConnection
+	response = request(t, client, http.MethodPost, server.URL+"/api/v1/rooms/"+secondRoomID+"/join", map[string]any{"seat": 1}, switcher.Headers)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("switch target status = %d: %s", response.StatusCode, readBody(response))
+	}
+	var switched room.TableSnapshot
+	decodeResponse(t, response, &switched)
+	if switched.RoomID != secondRoomID || playerByID(t, switched, switcher.ID).Seat != 1 {
+		t.Fatalf("switch response points at wrong membership: %#v", switched)
+	}
+	for name, connection := range connections {
+		for {
+			var event any
+			err := wsjson.Read(ctx, connection, &event)
+			if err == nil {
+				continue
+			}
+			if status := websocket.CloseStatus(err); status != roomMembershipRevoked {
+				t.Fatalf("%s switch close status = %d, err = %v", name, status, err)
+			}
+			break
+		}
+	}
+	response = request(t, client, http.MethodGet, server.URL+"/api/v1/me", nil, switcher.Headers)
+	var me struct {
+		ActiveRoomID string `json:"activeRoomId"`
+	}
+	decodeResponse(t, response, &me)
+	if me.ActiveRoomID != secondRoomID {
+		t.Fatalf("account retained stale active room: %q", me.ActiveRoomID)
+	}
+	response = request(t, client, http.MethodGet, server.URL+"/api/v1/rooms/"+firstRoomID+"/snapshot", nil, switcher.Headers)
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("previous room still recognized switcher: %d: %s", response.StatusCode, readBody(response))
 	}
 	response.Body.Close()
 }
