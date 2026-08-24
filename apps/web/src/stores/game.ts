@@ -83,6 +83,7 @@ export const useGameStore = defineStore("game", () => {
   function acceptSnapshot(next: TableSnapshot) {
     snapshot.value = structuredClone(next);
     roomConfig.value = structuredClone(next.config ?? { ...roomConfig.value, name: next.roomName, chipDenominations: [...next.allowedChipDenominations] });
+    connectionError.value = "";
     if (next.messages) {
       messages.value = next.messages.map((message) => ({
         id: message.id,
@@ -93,6 +94,7 @@ export const useGameStore = defineStore("game", () => {
     }
     const me = next.players.find((player) => player.isLocal);
     if (me) {
+      activeRoomId.value = next.roomId;
       accountPoints.value = me.accountPoints;
       currentUser.value = currentUser.value
         ? { ...currentUser.value, id: me.id, nickname: me.name }
@@ -126,7 +128,9 @@ export const useGameStore = defineStore("game", () => {
   }
 
   async function joinRoom(idOrCode: string, seat: number) {
+    const previousRoomId = snapshot.value.roomId;
     const next = await api.joinRoom(idOrCode, seat);
+    if (previousRoomId && previousRoomId !== next.roomId) disconnectRoomEvents();
     acceptSnapshot(next);
     backendOnline.value = true;
     return next;
@@ -158,6 +162,7 @@ export const useGameStore = defineStore("game", () => {
 
   function connectRoomEvents(roomId: string) {
     if (!apiMode || !backendOnline.value) return;
+    if (eventSocket && eventRoomId !== roomId) disconnectRoomEvents();
     shouldReconnect = true;
     eventRoomId = roomId;
     if (eventSocket && (eventSocket.readyState === WebSocket.OPEN || eventSocket.readyState === WebSocket.CONNECTING)) return;
@@ -242,6 +247,11 @@ export const useGameStore = defineStore("game", () => {
     socket?.close();
     connectionState.value = "offline";
     voice.disconnect();
+    microphoneEnabled.value = false;
+    activeSpeakerId.value = null;
+    voiceConnected.value = false;
+    voiceTransport.value = null;
+    for (const player of snapshot.value.players) player.isSpeaking = false;
   }
 
   async function addAccountPoints(amount: number) {
