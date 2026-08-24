@@ -147,7 +147,16 @@ export const useGameStore = defineStore("game", () => {
     try {
       requireBackend();
       const result = await api.roomCommand(roomId, { type, payload, expectedVersion: snapshot.value.version, requestId: crypto.randomUUID() });
-      if (type !== "room.leave" && type !== "room.end") await loadRoom(roomId);
+      if (type !== "room.leave" && type !== "room.end") {
+        try {
+          await loadRoom(roomId);
+        } catch {
+          if (type === "room.ready" && typeof payload.ready === "boolean" && localPlayer.value) {
+            localPlayer.value.isReady = payload.ready;
+          }
+          connectionError.value = "操作已提交，正在恢复最新牌桌状态";
+        }
+      }
       return result.event;
     } catch (reason) {
       if (reason instanceof ApiError && reason.code === "version_conflict") {
