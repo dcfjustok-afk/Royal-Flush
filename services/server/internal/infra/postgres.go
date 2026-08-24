@@ -36,6 +36,10 @@ func (p *Postgres) Close() {
 	p.pool.Close()
 }
 
+func (p *Postgres) Pool() *pgxpool.Pool {
+	return p.pool
+}
+
 func (p *Postgres) AppendRoomEvent(ctx context.Context, actorUserID string, event room.Envelope) error {
 	payload, err := json.Marshal(event.Payload)
 	if err != nil {

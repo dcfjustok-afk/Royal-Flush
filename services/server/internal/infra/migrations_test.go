@@ -29,4 +29,12 @@ func TestInitialMigrationContainsCriticalIntegrityConstraints(t *testing.T) {
 			t.Errorf("migration is missing %q", fragment)
 		}
 	}
+	settlementPath := filepath.Join(filepath.Dir(source), "..", "..", "migrations", "003_settlement_idempotency.sql")
+	settlement, err := os.ReadFile(settlementPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(settlement), "score_ledger_unique_settlement") {
+		t.Fatal("settlement idempotency migration is missing its unique index")
+	}
 }

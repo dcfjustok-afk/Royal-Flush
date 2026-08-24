@@ -152,7 +152,9 @@ type Actor struct {
 	disconnects    chan disconnectSignal
 	stop           chan struct{}
 	onSeatClosed   func(userID string)
-	onCodeChanged  func(oldCode, newCode string)
+	onCodeChanged  func(oldCode, newCode string) error
+	onOwnerChanged func(ownerID string) error
+	onRoomEnded    func() error
 }
 
 func NewActor(config Config, owner Identity, scores AccountScores, onSeatClosed func(string)) (*Actor, error) {
@@ -218,6 +220,15 @@ func (a *Actor) Join(ctx context.Context, identity Identity, seat int) (TableSna
 		a.nextJoin++
 		a.joinOrder[identity.ID] = a.nextJoin
 		if a.OwnerID == "" {
+			if a.onOwnerChanged != nil {
+				if err := a.onOwnerChanged(identity.ID); err != nil {
+					_, _ = a.game.RemoveSeat(seat)
+					delete(a.identities, identity.ID)
+					delete(a.joinOrder, identity.ID)
+					a.nextJoin--
+					return nil, err
+				}
+			}
 			a.OwnerID = identity.ID
 		}
 		a.version++
@@ -531,10 +542,12 @@ func (a *Actor) applyCommand(userID string, seat int, command ClientCommand) (an
 			return nil, "", err
 		}
 		oldCode := a.Code
-		a.Code = code
 		if a.onCodeChanged != nil {
-			a.onCodeChanged(oldCode, code)
+			if err := a.onCodeChanged(oldCode, code); err != nil {
+				return nil, "", err
+			}
 		}
+		a.Code = code
 		return map[string]any{"roomCode": code}, "room.invite_rotated", nil
 	case "room.transfer_owner":
 		if userID != a.OwnerID {
@@ -549,6 +562,11 @@ func (a *Actor) applyCommand(userID string, seat int, command ClientCommand) (an
 		if a.seatFor(payload.UserID) < 0 {
 			return nil, "", ErrPlayerNotSeated
 		}
+		if a.onOwnerChanged != nil {
+			if err := a.onOwnerChanged(payload.UserID); err != nil {
+				return nil, "", err
+			}
+		}
 		a.OwnerID = payload.UserID
 		return payload, "room.owner_transferred", nil
 	case "room.end":
@@ -557,6 +575,11 @@ func (a *Actor) applyCommand(userID string, seat int, command ClientCommand) (an
 		}
 		if a.game.InHand() {
 			return nil, "", poker.ErrHandInProgress
+		}
+		if a.onRoomEnded != nil {
+			if err := a.onRoomEnded(); err != nil {
+				return nil, "", err
+			}
 		}
 		a.ended = true
 		a.settleAll()
@@ -764,9 +787,15 @@ func (a *Actor) transferOwnerAfterDeparture() {
 		}
 	}
 	if candidate != nil {
+		if a.onOwnerChanged != nil {
+			_ = a.onOwnerChanged(candidate.UserID)
+		}
 		a.OwnerID = candidate.UserID
 		a.publish("room.owner_transferred", "", map[string]any{"userId": candidate.UserID, "automatic": true})
 		return
+	}
+	if a.onOwnerChanged != nil {
+		_ = a.onOwnerChanged("")
 	}
 	a.OwnerID = ""
 }

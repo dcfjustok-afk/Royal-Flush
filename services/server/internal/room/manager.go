@@ -14,6 +14,7 @@ var ErrAlreadySeated = errors.New("an account can occupy a seat in only one room
 type Manager struct {
 	mu          sync.RWMutex
 	scores      AccountScores
+	store       Store
 	rooms       map[string]*Actor
 	byCode      map[string]*Actor
 	activeSeat  map[string]string
@@ -22,10 +23,14 @@ type Manager struct {
 }
 
 func NewManager(scores AccountScores) *Manager {
-	return &Manager{scores: scores, rooms: make(map[string]*Actor), byCode: make(map[string]*Actor), activeSeat: make(map[string]string), emptyTimers: make(map[string]*time.Timer), emptyWait: 30 * time.Minute}
+	return NewManagerWithStore(scores, nil)
 }
 
-func (m *Manager) Create(_ context.Context, config Config, owner Identity) (*Actor, error) {
+func NewManagerWithStore(scores AccountScores, store Store) *Manager {
+	return &Manager{scores: scores, store: store, rooms: make(map[string]*Actor), byCode: make(map[string]*Actor), activeSeat: make(map[string]string), emptyTimers: make(map[string]*time.Timer), emptyWait: 30 * time.Minute}
+}
+
+func (m *Manager) Create(ctx context.Context, config Config, owner Identity) (*Actor, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.activeSeat[owner.ID] != "" {
@@ -35,8 +40,28 @@ func (m *Manager) Create(_ context.Context, config Config, owner Identity) (*Act
 	if err != nil {
 		return nil, err
 	}
-	actor.onCodeChanged = func(oldCode, newCode string) {
-		m.updateRoomCode(actor, oldCode, newCode)
+	if m.store != nil {
+		err := m.store.CreateRoom(ctx, Record{
+			ID: actor.ID, Code: actor.Code, OwnerID: actor.OwnerID, Config: config,
+			Version: actor.version, CreatedAt: actor.CreatedAt,
+		})
+		if err != nil {
+			actor.Close()
+			return nil, err
+		}
+	}
+	actor.onCodeChanged = func(oldCode, newCode string) error { return m.updateRoomCode(actor, oldCode, newCode) }
+	actor.onOwnerChanged = func(ownerID string) error {
+		if m.store == nil {
+			return nil
+		}
+		return m.store.UpdateRoomOwner(context.Background(), actor.ID, ownerID)
+	}
+	actor.onRoomEnded = func() error {
+		if m.store == nil {
+			return nil
+		}
+		return m.store.EndRoom(context.Background(), actor.ID, time.Now().UTC())
 	}
 	m.rooms[actor.ID] = actor
 	m.byCode[actor.Code] = actor
@@ -143,14 +168,42 @@ func (m *Manager) expireEmptyRoom(roomID string, actor *Actor) {
 	}
 	delete(m.emptyTimers, roomID)
 	m.mu.Unlock()
+	if m.store != nil {
+		_ = m.store.EndRoom(context.Background(), roomID, time.Now().UTC())
+	}
 	actor.Close()
 }
 
-func (m *Manager) updateRoomCode(actor *Actor, oldCode, newCode string) {
+func (m *Manager) updateRoomCode(actor *Actor, oldCode, newCode string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.store != nil {
+		if err := m.store.UpdateRoomCode(context.Background(), actor.ID, oldCode, newCode); err != nil {
+			return err
+		}
+	}
 	if m.byCode[oldCode] == actor {
 		delete(m.byCode, oldCode)
 	}
 	m.byCode[newCode] = actor
+	return nil
+}
+
+func (m *Manager) Close() {
+	m.mu.Lock()
+	actors := make([]*Actor, 0, len(m.rooms))
+	for _, timer := range m.emptyTimers {
+		timer.Stop()
+	}
+	for _, actor := range m.rooms {
+		actors = append(actors, actor)
+	}
+	m.rooms = make(map[string]*Actor)
+	m.byCode = make(map[string]*Actor)
+	m.activeSeat = make(map[string]string)
+	m.emptyTimers = make(map[string]*time.Timer)
+	m.mu.Unlock()
+	for _, actor := range actors {
+		actor.Close()
+	}
 }

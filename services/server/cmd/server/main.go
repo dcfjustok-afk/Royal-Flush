@@ -11,20 +11,49 @@ import (
 	"time"
 
 	"github.com/royal-flush/royal-flush/services/server/internal/httpapi"
+	"github.com/royal-flush/royal-flush/services/server/internal/infra"
 	"github.com/royal-flush/royal-flush/services/server/internal/voice"
+	"github.com/royal-flush/royal-flush/services/server/migrations"
 )
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	port := env("PORT", "8080")
 	development := env("ENVIRONMENT", "development") == "development"
-	server := httpapi.New(httpapi.Config{
+	databaseURL := os.Getenv("DATABASE_URL")
+	var database *infra.Postgres
+	if databaseURL != "" {
+		startupContext, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		var err error
+		database, err = infra.OpenPostgres(startupContext, databaseURL)
+		if err == nil {
+			err = migrations.Run(startupContext, database.Pool())
+		}
+		cancel()
+		if err != nil {
+			logger.Error("postgres initialization failed", "error", err)
+			os.Exit(1)
+		}
+		defer database.Close()
+	} else if !development {
+		logger.Error("DATABASE_URL is required outside development")
+		os.Exit(1)
+	} else {
+		logger.Warn("using in-memory persistence because DATABASE_URL is not configured")
+	}
+	applicationConfig := httpapi.Config{
 		Development:    development,
 		AllowedOrigins: splitCSV(os.Getenv("ALLOWED_ORIGINS")),
 		Voice:          voice.Config{URL: os.Getenv("LIVEKIT_URL"), APIKey: os.Getenv("LIVEKIT_API_KEY"), APISecret: os.Getenv("LIVEKIT_API_SECRET")},
-	}, logger)
+	}
+	if database != nil {
+		applicationConfig.ScoreStore = database
+		applicationConfig.RoomStore = database
+	}
+	application := httpapi.New(applicationConfig, logger)
+	defer application.Close()
 	httpServer := &http.Server{
-		Addr: ":" + port, Handler: server.Handler(), ReadHeaderTimeout: 5 * time.Second,
+		Addr: ":" + port, Handler: application.Handler(), ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second,
 	}
 	go func() {

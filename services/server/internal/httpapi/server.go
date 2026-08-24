@@ -23,6 +23,8 @@ type Config struct {
 	Development    bool
 	AllowedOrigins []string
 	Voice          voice.Config
+	ScoreStore     score.Store
+	RoomStore      room.Store
 }
 
 type Server struct {
@@ -43,15 +45,19 @@ func New(config Config, logger *slog.Logger) *Server {
 		logger = slog.Default()
 	}
 	authService := auth.NewService(config.Development, nil)
-	scoreService := score.NewService(nil)
+	scoreService := score.NewServiceWithStore(config.ScoreStore, nil)
 	server := &Server{config: config, log: logger, auth: authService, scores: scoreService}
-	server.rooms = room.NewManager(scoreService)
+	server.rooms = room.NewManagerWithStore(scoreService, config.RoomStore)
 	server.router = server.routes()
 	return server
 }
 
 func (s *Server) Handler() http.Handler {
 	return s.router
+}
+
+func (s *Server) Close() {
+	s.rooms.Close()
 }
 
 func (s *Server) routes() http.Handler {

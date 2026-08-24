@@ -58,6 +58,7 @@ type Result struct {
 type Service struct {
 	mu                sync.Mutex
 	now               func() time.Time
+	store             Store
 	nextID            int64
 	current           Epoch
 	epochs            []Epoch
@@ -71,6 +72,10 @@ type Service struct {
 }
 
 func NewService(now func() time.Time) *Service {
+	return NewServiceWithStore(nil, now)
+}
+
+func NewServiceWithStore(store Store, now func() time.Time) *Service {
 	if now == nil {
 		now = time.Now
 	}
@@ -78,6 +83,7 @@ func NewService(now func() time.Time) *Service {
 	initial := Epoch{ID: 1, BaseScore: InitialBalance, Administrator: "system", Reason: "initial epoch", CreatedAt: createdAt}
 	return &Service{
 		now:               now,
+		store:             store,
 		nextID:            1,
 		current:           initial,
 		epochs:            []Epoch{initial},
@@ -92,6 +98,13 @@ func NewService(now func() time.Time) *Service {
 }
 
 func (s *Service) EnsureUser(userID string) int64 {
+	if s.store != nil {
+		balance, err := s.store.EnsureUser(userID, s.now().UTC())
+		if err == nil {
+			return balance
+		}
+		return InitialBalance
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ensureUserLocked(userID)
@@ -99,6 +112,13 @@ func (s *Service) EnsureUser(userID string) int64 {
 }
 
 func (s *Service) Balance(userID string) int64 {
+	if s.store != nil {
+		balance, err := s.store.Balance(userID)
+		if err == nil {
+			return balance
+		}
+		return InitialBalance
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ensureUserLocked(userID)
@@ -106,17 +126,20 @@ func (s *Service) Balance(userID string) int64 {
 }
 
 func (s *Service) Add(userID, roomID, requestID string, amount int64) (Result, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if requestID == "" {
 		return Result{}, ErrRequestID
 	}
+	if amount < 1 || amount > MaximumAddition {
+		return Result{}, ErrInvalidAmount
+	}
+	if s.store != nil {
+		return s.store.Add(userID, roomID, requestID, amount, s.now().UTC())
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	key := userID + "\x00" + requestID
 	if result, ok := s.additionResults[key]; ok {
 		return result, nil
-	}
-	if amount < 1 || amount > MaximumAddition {
-		return Result{}, ErrInvalidAmount
 	}
 	now := s.now().UTC()
 	if last, ok := s.lastAddition[userID]; ok && now.Sub(last) < 5*time.Second {
@@ -132,11 +155,14 @@ func (s *Service) Add(userID, roomID, requestID string, amount int64) (Result, e
 }
 
 func (s *Service) ApplySettlement(userID, roomID, seatSessionID string, net int64) (Result, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if seatSessionID == "" {
 		return Result{}, ErrSessionID
 	}
+	if s.store != nil {
+		return s.store.ApplySettlement(userID, roomID, seatSessionID, net, s.now().UTC())
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if result, ok := s.settlementResults[seatSessionID]; ok {
 		return result, nil
 	}
@@ -155,11 +181,14 @@ func (s *Service) ResetAll(administrator, reason string) (Epoch, error) {
 }
 
 func (s *Service) ResetAllWithRequest(administrator, reason, requestID string) (Epoch, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if requestID == "" {
 		return Epoch{}, false, ErrRequestID
 	}
+	if s.store != nil {
+		return s.store.ResetAllWithRequest(administrator, reason, requestID, s.now().UTC())
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	key := administrator + "\x00" + requestID
 	if epoch, ok := s.resetResults[key]; ok {
 		return epoch, true, nil
@@ -194,6 +223,13 @@ func (s *Service) resetAllLocked(administrator, reason string) (Epoch, error) {
 }
 
 func (s *Service) Ledger(userID string) (int64, []LedgerEntry) {
+	if s.store != nil {
+		balance, entries, err := s.store.Ledger(userID)
+		if err == nil {
+			return balance, entries
+		}
+		return InitialBalance, nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ensureUserLocked(userID)
@@ -215,6 +251,13 @@ func (s *Service) Ledger(userID string) (int64, []LedgerEntry) {
 }
 
 func (s *Service) Epochs() []Epoch {
+	if s.store != nil {
+		epochs, err := s.store.Epochs()
+		if err == nil {
+			return epochs
+		}
+		return nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	result := append([]Epoch(nil), s.epochs...)

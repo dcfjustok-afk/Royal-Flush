@@ -229,6 +229,29 @@ func TestEmptyRoomExpiresUnlessAnotherPlayerJoins(t *testing.T) {
 	t.Fatal("empty room was not expired after the retention window")
 }
 
+func TestEmptyRoomJoinRollsBackWhenOwnerPersistenceFails(t *testing.T) {
+	ctx := context.Background()
+	actor, err := NewActor(testConfig(), Identity{ID: "owner", Name: "房主"}, score.NewService(nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer actor.Close()
+	if _, _, err := actor.Handle(ctx, "owner", ClientCommand{Type: "room.leave", RequestID: "leave-owner"}); err != nil {
+		t.Fatal(err)
+	}
+	actor.onOwnerChanged = func(string) error { return errors.New("database unavailable") }
+	if _, err := actor.Join(ctx, Identity{ID: "u2", Name: "接替玩家"}, 3); err == nil {
+		t.Fatal("join succeeded after owner persistence failed")
+	}
+	public, err := actor.PublicSnapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(public.Players) != 0 || public.OwnerID != "" {
+		t.Fatalf("failed join left room state behind: %#v", public)
+	}
+}
+
 func TestRaiseValidationVersionAndIdempotency(t *testing.T) {
 	ctx := context.Background()
 	scores := score.NewService(nil)
