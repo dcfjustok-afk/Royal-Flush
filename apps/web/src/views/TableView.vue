@@ -33,7 +33,7 @@ const actionProgress = computed(() => {
 });
 const speakingPlayer = computed(() => store.voiceConnected ? store.snapshot.players.find((player) => player.isSpeaking) : undefined);
 const isOwner = computed(() => Boolean(store.localPlayer && store.snapshot.ownerId === store.localPlayer.id));
-const canAct = computed(() => acting.value && !store.commandPending && (!apiMode || store.connectionState === "connected"));
+const canAct = computed(() => acting.value && !store.commandPending && store.connectionState === "connected");
 const connectionLabel = computed(() => ({ offline: "实时连接离线", connecting: "正在连接牌桌", connected: "连接稳定", reconnecting: "正在恢复牌桌" })[store.connectionState]);
 
 function playerForSeat(seat: number) {
@@ -117,7 +117,6 @@ onBeforeUnmount(() => {
     <SystemBroadcast :text="broadcast.text" :at="broadcast.at" />
 
     <section class="table-stage" aria-label="德州扑克牌桌">
-      <span v-if="!apiMode" class="table-demo-marker">本地演示数据</span>
       <div class="table-telemetry"><span :class="{ unstable: store.connectionState !== 'connected' }"><Signal />{{ connectionLabel }}</span><span>手牌 <strong>{{ String(store.snapshot.handNumber).padStart(3, "0") }}</strong></span><span>盲注 <strong>{{ store.roomConfig.blindPreset }}</strong></span></div>
       <div v-if="tableError || (apiMode && store.connectionState !== 'connected')" class="table-state-banner" role="status"><WifiOff /><span>{{ tableError || connectionLabel }}</span><button type="button" :disabled="store.roomLoading" @click="retryConnection"><RefreshCw />{{ store.roomLoading ? "恢复中" : "重新连接" }}</button></div>
       <div class="poker-table-shell">
@@ -146,7 +145,7 @@ onBeforeUnmount(() => {
       <aside v-if="sidePanel" class="table-side-panel" :aria-label="sidePanel === 'history' ? '牌局记录' : '牌桌设置'">
         <header><div><Radio v-if="sidePanel === 'history'" /><Settings v-else /><h2>{{ sidePanel === 'history' ? "牌局记录" : "牌桌设置" }}</h2></div><button class="icon-button" type="button" title="关闭面板" aria-label="关闭面板" @click="sidePanel = null"><PanelRightClose /></button></header>
         <template v-if="sidePanel === 'history'">
-          <ol class="event-log"><li v-for="message in store.messages" :key="message.id"><time>{{ message.at }}</time><span :class="message.type" /><p>{{ message.text }}</p></li></ol>
+          <ol class="event-log"><li v-for="message in store.messages" :key="message.id"><time>{{ message.at }}</time><span :class="message.type" /><p>{{ message.text }}</p></li><li v-if="!store.messages.length" class="event-log-empty"><p>暂无牌局记录</p></li></ol>
         </template>
         <template v-else>
           <ScoreAddPanel />

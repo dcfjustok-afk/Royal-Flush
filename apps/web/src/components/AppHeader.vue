@@ -15,12 +15,11 @@ const store = useGameStore();
       <RouterLink to="/profile"><History />记录</RouterLink>
     </nav>
     <div class="header-account">
-      <span class="connection-state" :class="{ offline: !store.backendOnline }"><Wifi />{{ store.backendOnline ? "服务已连接" : "本地演示" }}</span>
-      <span class="score-readout"><small>局外积分</small><strong>{{ store.accountPoints.toLocaleString("zh-CN") }}</strong></span>
+      <span class="connection-state" :class="{ offline: !store.backendOnline }"><Wifi />{{ store.backendOnline ? "服务已连接" : "服务未连接" }}</span>
+      <span class="score-readout"><small>局外积分</small><strong>{{ store.accountPoints?.toLocaleString("zh-CN") ?? "--" }}</strong></span>
       <RouterLink class="icon-button" to="/rooms/new" title="创建牌局" aria-label="创建牌局"><Plus /></RouterLink>
       <button class="icon-button" type="button" title="通知" aria-label="通知"><Bell /></button>
-      <RouterLink class="account-button" to="/profile"><CircleUserRound /><span>岱奇</span><VoiceMeter :active="store.microphoneEnabled" label="麦克风已开启" /></RouterLink>
+      <RouterLink class="account-button" to="/profile"><CircleUserRound /><span>{{ store.currentUser?.nickname ?? "未登录" }}</span><VoiceMeter :active="store.microphoneEnabled" label="麦克风已开启" /></RouterLink>
     </div>
   </header>
 </template>
-

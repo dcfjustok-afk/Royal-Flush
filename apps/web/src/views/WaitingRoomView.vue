@@ -31,10 +31,6 @@ async function copyInvite() {
 
 async function toggleReady() {
   const next = !ready.value;
-  if (!apiMode || !store.backendOnline) {
-    if (store.localPlayer) store.localPlayer.isReady = next;
-    return;
-  }
   try {
     await store.sendCommand("room.ready", { ready: next });
   } catch (reason) {
@@ -44,7 +40,7 @@ async function toggleReady() {
 
 async function startGame() {
   try {
-    if (apiMode && store.backendOnline) await store.sendCommand("game.start");
+    await store.sendCommand("game.start");
     await router.push(`/rooms/${store.snapshot.roomId}/table`);
   } catch (reason) {
     actionError.value = reason instanceof Error ? reason.message : "无法开始牌局";
@@ -53,7 +49,10 @@ async function startGame() {
 
 onMounted(async () => {
   await store.probeBackend();
-  if (!apiMode || !store.backendOnline) return;
+  if (!apiMode || !store.backendOnline) {
+    actionError.value = "服务暂时不可用，请稍后重试";
+    return;
+  }
   try {
     const snapshot = await store.loadRoom(String(route.params.id));
     store.connectRoomEvents(snapshot.roomId);
@@ -94,7 +93,7 @@ function selectMicrophone(event: Event) {
         <RoomManagementPanel v-if="isOwner" @room-ended="router.push('/')" />
         <p v-if="actionError" class="form-message error">{{ actionError }}</p>
         <button class="ready-button" :class="{ ready }" type="button" @click="toggleReady"><Check v-if="ready" /><span><strong>{{ ready ? "已准备" : "准备入局" }}</strong><small>{{ ready ? "等待房主开始" : "确认牌局设置和语音状态" }}</small></span></button>
-        <button class="button primary wide" type="button" :disabled="!ready || !isOwner || (apiMode && readyCount < 2)" @click="startGame"><Play />{{ isOwner ? (apiMode && readyCount < 2 ? "等待至少两人准备" : "开始牌局") : "等待房主开局" }}</button>
+        <button class="button primary wide" type="button" :disabled="!ready || !isOwner || readyCount < 2 || !store.backendOnline" @click="startGame"><Play />{{ isOwner ? (readyCount < 2 ? "等待至少两人准备" : "开始牌局") : "等待房主开局" }}</button>
       </aside>
     </main>
   </div>

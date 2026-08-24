@@ -1,7 +1,7 @@
-import type { ChipDenomination, RoomConfig, RoomEvent, ScoreLedgerEntry, TableSnapshot } from "@royal-flush/contracts";
+import type { ChipDenomination, RoomConfig, ScoreLedgerEntry, TableSnapshot } from "@royal-flush/contracts";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
-import { demoLedger, demoMessages, demoRoomConfig, demoSnapshot } from "@/data/demo";
+import { emptyRoomConfig, emptySnapshot } from "@/data/empty";
 import { api, ApiError, apiMode } from "@/lib/api";
 import { VoiceController } from "@/lib/voice";
 
@@ -13,11 +13,13 @@ export function reconnectDelay(attempt: number) {
 }
 
 export const useGameStore = defineStore("game", () => {
-  const accountPoints = ref(1860);
-  const ledger = ref<ScoreLedgerEntry[]>(structuredClone(demoLedger));
-  const roomConfig = ref<RoomConfig>(structuredClone(demoRoomConfig));
-  const snapshot = ref<TableSnapshot>(structuredClone(demoSnapshot));
-  const messages = ref<Message[]>(structuredClone(demoMessages));
+  const accountPoints = ref<number | null>(null);
+  const currentUser = ref<{ id: string; nickname: string } | null>(null);
+  const activeRoomId = ref("");
+  const ledger = ref<ScoreLedgerEntry[]>([]);
+  const roomConfig = ref<RoomConfig>(structuredClone(emptyRoomConfig));
+  const snapshot = ref<TableSnapshot>(structuredClone(emptySnapshot));
+  const messages = ref<Message[]>([]);
   const microphoneEnabled = ref(false);
   const voiceConnected = ref(false);
   const voiceError = ref("");
@@ -26,7 +28,7 @@ export const useGameStore = defineStore("game", () => {
   const selectedMicrophoneId = ref("");
   const voiceBusy = ref(false);
   const backendOnline = ref(false);
-  const connectionState = ref<RealtimeConnectionState>(apiMode ? "offline" : "connected");
+  const connectionState = ref<RealtimeConnectionState>("offline");
   const connectionError = ref("");
   const roomLoading = ref(false);
   const commandPending = ref(false);
@@ -61,7 +63,9 @@ export const useGameStore = defineStore("game", () => {
   async function refreshAccount() {
     if (!apiMode || !backendOnline.value) return;
     const [me, scoreLedger] = await Promise.all([api.me(), api.scoreLedger()]);
+    currentUser.value = me.user;
     accountPoints.value = me.balance;
+    activeRoomId.value = me.activeRoomId ?? "";
     ledger.value = scoreLedger.entries;
     if (me.activeRoomId) await loadRoom(me.activeRoomId).catch(() => undefined);
   }
@@ -80,6 +84,7 @@ export const useGameStore = defineStore("game", () => {
     const me = next.players.find((player) => player.isLocal);
     if (me) {
       accountPoints.value = me.accountPoints;
+      currentUser.value = { id: me.id, nickname: me.name };
       if (me.isMuted && microphoneEnabled.value) {
         void voice.disableMicrophone();
         microphoneEnabled.value = false;
@@ -90,14 +95,14 @@ export const useGameStore = defineStore("game", () => {
 
   async function createRoom(config: RoomConfig) {
     updateRoomConfig(config);
-    if (!apiMode || !backendOnline.value) return { id: "room-new", code: "RF-NEW" };
+    requireBackend();
     const created = await api.createRoom(config);
     acceptSnapshot(created.snapshot);
     return { id: created.id, code: created.code };
   }
 
   async function loadRoom(roomId: string) {
-    if (!apiMode || !backendOnline.value) return snapshot.value;
+    requireBackend();
     roomLoading.value = true;
     try {
       const next = await api.roomSnapshot(roomId);
@@ -115,50 +120,8 @@ export const useGameStore = defineStore("game", () => {
     return next;
   }
 
-  function applyDemoCommand(type: string, payload: Record<string, unknown>) {
-    const userId = String(payload.userId ?? "");
-    const target = snapshot.value.players.find((player) => player.id === userId);
-    switch (type) {
-      case "room.ready":
-        if (localPlayer.value) localPlayer.value.isReady = Boolean(payload.ready);
-        break;
-      case "room.quick_message":
-        messages.value.unshift({ id: crypto.randomUUID(), type: "quick", text: `${localPlayer.value?.name ?? "你"}：${String(payload.message)}`, at: new Date().toLocaleTimeString("zh-CN", { hour12: false }) });
-        break;
-      case "voice.mute":
-        if (target) target.isMuted = Boolean(payload.muted);
-        break;
-      case "room.remove_player":
-        snapshot.value.players = snapshot.value.players.filter((player) => player.id !== userId);
-        break;
-      case "room.rotate_invite":
-        snapshot.value.roomCode = `RF-${Math.floor(1000 + Math.random() * 9000)}`;
-        break;
-      case "room.transfer_owner":
-        snapshot.value.ownerId = userId;
-        break;
-      case "room.refill":
-        if (localPlayer.value?.tablePoints === 0) {
-          localPlayer.value.tablePoints = 1000;
-          localPlayer.value.status = "active";
-        }
-        break;
-      case "room.leave":
-        snapshot.value.players = snapshot.value.players.filter((player) => !player.isLocal);
-        break;
-      case "room.end":
-        snapshot.value.ended = true;
-        break;
-    }
-    snapshot.value.version += 1;
-    return {
-      type,
-      requestId: crypto.randomUUID(),
-      roomId: snapshot.value.roomId,
-      version: snapshot.value.version,
-      sentAt: new Date().toISOString(),
-      payload,
-    } satisfies RoomEvent;
+  function requireBackend() {
+    if (!apiMode || !backendOnline.value) throw new Error("服务暂时不可用，请稍后重试");
   }
 
   async function sendCommand(type: string, payload: Record<string, unknown> = {}) {
@@ -166,7 +129,7 @@ export const useGameStore = defineStore("game", () => {
     const roomId = snapshot.value.roomId;
     commandPending.value = true;
     try {
-      if (!apiMode || !backendOnline.value) return applyDemoCommand(type, payload);
+      requireBackend();
       const result = await api.roomCommand(roomId, { type, payload, expectedVersion: snapshot.value.version, requestId: crypto.randomUUID() });
       if (type !== "room.leave" && type !== "room.end") await loadRoom(roomId);
       return result.event;
@@ -262,21 +225,13 @@ export const useGameStore = defineStore("game", () => {
     const waitMs = 5000 - (Date.now() - lastScoreAdditionAt.value);
     if (waitMs > 0) throw new Error(`请等待 ${Math.ceil(waitMs / 1000)} 秒后再增加积分`);
 
-    if (apiMode && backendOnline.value) {
-      const result = await api.addScore({ amount, roomId: snapshot.value.roomId, requestId: crypto.randomUUID() });
-      accountPoints.value = result.balance;
-      ledger.value.unshift(result.entry);
-    } else {
-      accountPoints.value += amount;
-      ledger.value.unshift({
-        id: crypto.randomUUID(), type: "self_add", amount, balance: accountPoints.value,
-        roomId: snapshot.value.roomId, note: "自行增加积分", createdAt: new Date().toISOString(),
-      });
-    }
+    requireBackend();
+    const result = await api.addScore({ amount, roomId: snapshot.value.roomId || undefined, requestId: crypto.randomUUID() });
+    accountPoints.value = result.balance;
+    ledger.value.unshift(result.entry);
 
     const me = localPlayer.value;
-    if (me) me.accountPoints = accountPoints.value;
-    messages.value.unshift({ id: crypto.randomUUID(), type: "score", text: `你自行增加了 ${amount.toLocaleString("zh-CN")} 积分，当前局外积分为 ${accountPoints.value.toLocaleString("zh-CN")}`, at: new Date().toLocaleTimeString("zh-CN", { hour12: false }) });
+    if (me) me.accountPoints = result.balance;
     lastScoreAdditionAt.value = Date.now();
   }
 
@@ -300,13 +255,7 @@ export const useGameStore = defineStore("game", () => {
         microphoneEnabled.value = false;
         return;
       }
-      if (!apiMode || !backendOnline.value) {
-        microphoneEnabled.value = true;
-        voiceConnected.value = true;
-        microphones.value = [{ deviceId: "default", label: "系统默认麦克风" }];
-        selectedMicrophoneId.value = "default";
-        return;
-      }
+      requireBackend();
       microphoneEnabled.value = await voice.enableMicrophone(snapshot.value.roomId);
       if (microphoneEnabled.value) await refreshMicrophones();
     } finally {
@@ -338,60 +287,24 @@ export const useGameStore = defineStore("game", () => {
     }
   }
 
-  function commitAction(label: string, cost: number) {
-    const me = localPlayer.value;
-    if (!me || !me.isCurrentActor) return;
-    me.tablePoints = Math.max(0, me.tablePoints - cost);
-    me.streetCommitted += cost;
-    me.isCurrentActor = false;
-    const next = snapshot.value.players.find((player) => !player.isLocal && player.status === "active");
-    if (next) next.isCurrentActor = true;
-    snapshot.value.version += 1;
-    snapshot.value.pot += cost;
-    messages.value.unshift({ id: crypto.randomUUID(), type: "action", text: label, at: new Date().toLocaleTimeString("zh-CN", { hour12: false }) });
-  }
-
   async function raise(chips: ChipDenomination[]) {
-    if (apiMode && backendOnline.value) {
-      await sendCommand("action.raise", { chips });
-      return;
-    }
-    const raiseBy = chips.reduce<number>((sum, chip) => sum + chip, 0);
-    commitAction(`你加注 ${raiseBy}，本轮总投入 ${snapshot.value.toCall + raiseBy}`, snapshot.value.toCall + raiseBy);
+    await sendCommand("action.raise", { chips });
   }
 
   async function call() {
-    if (apiMode && backendOnline.value) {
-      await sendCommand(snapshot.value.canCheck ? "action.check" : "action.call");
-      return;
-    }
-    commitAction(snapshot.value.canCheck ? "你选择过牌" : `你跟注 ${snapshot.value.toCall}`, snapshot.value.canCheck ? 0 : snapshot.value.toCall);
+    await sendCommand(snapshot.value.canCheck ? "action.check" : "action.call");
   }
 
   async function fold() {
-    if (apiMode && backendOnline.value) {
-      await sendCommand("action.fold");
-      return;
-    }
-    const me = localPlayer.value;
-    if (me) me.status = "folded";
-    commitAction("你选择弃牌", 0);
+    await sendCommand("action.fold");
   }
 
   async function allIn() {
-    if (apiMode && backendOnline.value) {
-      await sendCommand("action.all_in");
-      return;
-    }
-    const me = localPlayer.value;
-    if (!me) return;
-    const amount = me.tablePoints;
-    commitAction(`你全下 ${amount}`, amount);
-    me.status = "all-in";
+    await sendCommand("action.all_in");
   }
 
   return {
-    accountPoints, ledger, roomConfig, snapshot, messages, microphoneEnabled, voiceConnected, voiceError, activeSpeakerId, microphones, selectedMicrophoneId, voiceBusy,
+    accountPoints, currentUser, activeRoomId, ledger, roomConfig, snapshot, messages, microphoneEnabled, voiceConnected, voiceError, activeSpeakerId, microphones, selectedMicrophoneId, voiceBusy,
     backendOnline, connectionState, connectionError, roomLoading, commandPending,
     localPlayer, activePlayers, probeBackend, refreshAccount, acceptSnapshot, createRoom, loadRoom, joinRoom, sendCommand, connectRoomEvents, disconnectRoomEvents,
     addAccountPoints, updateRoomConfig, toggleMicrophone, refreshMicrophones, selectMicrophone, raise, call, fold, allIn,
