@@ -150,6 +150,71 @@ func TestMultiUserAccountRoomAndHandMatrix(t *testing.T) {
 	response.Body.Close()
 }
 
+func TestJoiningAnotherRoomSwitchesMembershipAtomically(t *testing.T) {
+	application := New(Config{Development: false}, nil)
+	t.Cleanup(application.Close)
+	server := httptest.NewServer(application.Handler())
+	defer server.Close()
+	client := server.Client()
+	switcher := registerMatrixAccount(t, client, server.URL, "13800138201", "换桌玩家")
+	secondOwner := registerMatrixAccount(t, client, server.URL, "13800138202", "二桌房主")
+	fullOwner := registerMatrixAccount(t, client, server.URL, "13800138203", "满桌房主")
+	fullPlayer := registerMatrixAccount(t, client, server.URL, "13800138204", "满桌玩家")
+	roomBody := map[string]any{
+		"name": "切换矩阵", "maxPlayers": 2, "blindPreset": "5/10", "actionSeconds": 20,
+		"voiceEnabled": true, "chipDenominations": []int{5, 10, 20, 50, 100},
+	}
+	create := func(account matrixAccount) string {
+		t.Helper()
+		response := request(t, client, http.MethodPost, server.URL+"/api/v1/rooms", roomBody, account.Headers)
+		var created struct {
+			ID string `json:"id"`
+		}
+		decodeResponse(t, response, &created)
+		return created.ID
+	}
+	firstRoomID := create(switcher)
+	secondRoomID := create(secondOwner)
+	fullRoomID := create(fullOwner)
+	response := request(t, client, http.MethodPost, server.URL+"/api/v1/rooms/"+fullRoomID+"/join", map[string]any{"seat": 1}, fullPlayer.Headers)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("fill target room status = %d: %s", response.StatusCode, readBody(response))
+	}
+	response.Body.Close()
+	response = request(t, client, http.MethodPost, server.URL+"/api/v1/rooms/"+fullRoomID+"/join", map[string]any{"seat": 1}, switcher.Headers)
+	if response.StatusCode != http.StatusConflict {
+		t.Fatalf("full target switch status = %d: %s", response.StatusCode, readBody(response))
+	}
+	response.Body.Close()
+	response = request(t, client, http.MethodGet, server.URL+"/api/v1/rooms/"+firstRoomID+"/snapshot", nil, switcher.Headers)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("failed switch did not preserve current room: %d: %s", response.StatusCode, readBody(response))
+	}
+	response.Body.Close()
+	response = request(t, client, http.MethodPost, server.URL+"/api/v1/rooms/"+secondRoomID+"/join", map[string]any{"seat": 1}, switcher.Headers)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("switch target status = %d: %s", response.StatusCode, readBody(response))
+	}
+	var switched room.TableSnapshot
+	decodeResponse(t, response, &switched)
+	if switched.RoomID != secondRoomID || playerByID(t, switched, switcher.ID).Seat != 1 {
+		t.Fatalf("switch response points at wrong membership: %#v", switched)
+	}
+	response = request(t, client, http.MethodGet, server.URL+"/api/v1/me", nil, switcher.Headers)
+	var me struct {
+		ActiveRoomID string `json:"activeRoomId"`
+	}
+	decodeResponse(t, response, &me)
+	if me.ActiveRoomID != secondRoomID {
+		t.Fatalf("account retained stale active room: %q", me.ActiveRoomID)
+	}
+	response = request(t, client, http.MethodGet, server.URL+"/api/v1/rooms/"+firstRoomID+"/snapshot", nil, switcher.Headers)
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("previous room still recognized switcher: %d: %s", response.StatusCode, readBody(response))
+	}
+	response.Body.Close()
+}
+
 func registerMatrixAccount(t *testing.T, client *http.Client, baseURL, phone, nickname string) matrixAccount {
 	t.Helper()
 	response := request(t, client, http.MethodPost, baseURL+"/api/v1/auth/register", map[string]any{

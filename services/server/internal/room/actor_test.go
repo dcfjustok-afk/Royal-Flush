@@ -650,6 +650,76 @@ func TestCommandPersistenceFailureRestoresActorState(t *testing.T) {
 	}
 }
 
+func TestManagerSwitchesWaitingRoomsAndPreservesCurrentRoomOnTargetFailure(t *testing.T) {
+	ctx := context.Background()
+	manager := NewManager(score.NewService(nil))
+	first, err := manager.Create(ctx, testConfig(), Identity{ID: "switcher", Name: "换桌玩家"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	second, err := manager.Create(ctx, testConfig(), Identity{ID: "owner-b", Name: "房主 B"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	if _, err := manager.Join(ctx, second.ID, Identity{ID: "occupied", Name: "占座玩家"}, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Join(ctx, second.ID, Identity{ID: "switcher", Name: "换桌玩家"}, 1); !errors.Is(err, poker.ErrSeatOccupied) {
+		t.Fatalf("expected occupied target rejection, got %v", err)
+	}
+	if manager.ActiveRoom("switcher") != first.ID {
+		t.Fatalf("failed target switch removed current membership: %q", manager.ActiveRoom("switcher"))
+	}
+	if _, err := first.Snapshot(ctx, "switcher"); err != nil {
+		t.Fatalf("failed target switch removed player from current room: %v", err)
+	}
+	snapshot, err := manager.Join(ctx, second.ID, Identity{ID: "switcher", Name: "换桌玩家"}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.RoomID != second.ID || manager.ActiveRoom("switcher") != second.ID {
+		t.Fatalf("room switch did not select target: snapshot=%q active=%q", snapshot.RoomID, manager.ActiveRoom("switcher"))
+	}
+	if _, err := first.Snapshot(ctx, "switcher"); !errors.Is(err, ErrPlayerNotSeated) {
+		t.Fatalf("room switch retained previous seat: %v", err)
+	}
+}
+
+func TestManagerDoesNotSwitchRoomsDuringAnActiveHand(t *testing.T) {
+	ctx := context.Background()
+	manager := NewManager(score.NewService(nil))
+	first, err := manager.Create(ctx, testConfig(), Identity{ID: "switcher", Name: "换桌玩家"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	if _, err := manager.Join(ctx, first.ID, Identity{ID: "player-two", Name: "玩家二"}, 1); err != nil {
+		t.Fatal(err)
+	}
+	ready := json.RawMessage(`{"ready":true}`)
+	for _, userID := range []string{"switcher", "player-two"} {
+		if _, _, err := first.Handle(ctx, userID, ClientCommand{Type: "room.ready", RequestID: "ready-" + userID, Payload: ready}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := first.Handle(ctx, "switcher", ClientCommand{Type: "game.start", RequestID: "start"}); err != nil {
+		t.Fatal(err)
+	}
+	second, err := manager.Create(ctx, testConfig(), Identity{ID: "owner-b", Name: "房主 B"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	if _, err := manager.Join(ctx, second.ID, Identity{ID: "switcher", Name: "换桌玩家"}, 1); !errors.Is(err, ErrRoomSwitchInHand) {
+		t.Fatalf("expected active-hand switch rejection, got %v", err)
+	}
+	if manager.ActiveRoom("switcher") != first.ID {
+		t.Fatalf("active-hand rejection changed membership: %q", manager.ActiveRoom("switcher"))
+	}
+}
+
 func TestRoomActivityDoesNotPostponeTheActionDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()

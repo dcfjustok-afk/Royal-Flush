@@ -260,6 +260,10 @@ func writeDomainError(writer http.ResponseWriter, err error) {
 		status, code = http.StatusConflict, "version_conflict"
 	case errors.Is(err, room.ErrPlayerNotSeated):
 		status, code = http.StatusNotFound, "player_not_seated"
+	case errors.Is(err, room.ErrRoomSwitchInHand):
+		status, code = http.StatusConflict, "room_switch_in_hand"
+	case errors.Is(err, room.ErrRoomTransition):
+		status, code = http.StatusConflict, "room_transition"
 	case errors.Is(err, room.ErrAlreadySeated), errors.Is(err, poker.ErrSeatOccupied), errors.Is(err, poker.ErrPlayerSeated):
 		status, code = http.StatusConflict, "seat_conflict"
 	case errors.Is(err, score.ErrRateLimited):

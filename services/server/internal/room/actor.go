@@ -23,6 +23,8 @@ var (
 	ErrPlayerNotSeated     = errors.New("player is not seated in this room")
 	ErrPlayersNotReady     = errors.New("at least two ready players are required")
 	ErrInvalidQuickMessage = errors.New("quick message is not supported")
+	ErrRoomSwitchInHand    = errors.New("当前手牌进行中，结束后才能切换房间")
+	ErrRoomTransition      = errors.New("room has a player transition in progress")
 )
 
 type Identity struct {
@@ -145,6 +147,7 @@ type Actor struct {
 	actionGen      int64
 	ended          bool
 	processed      map[string]Envelope
+	reservations   map[int]string
 	subscribers    map[chan Envelope]struct{}
 	connections    map[string]int
 	disconnectGen  map[string]int64
@@ -192,7 +195,7 @@ func NewActor(config Config, owner Identity, scores AccountScores, onSeatClosed 
 	actor := &Actor{
 		ID: id, Code: code, OwnerID: owner.ID, CreatedAt: time.Now().UTC(), config: cloneConfig(config),
 		game: game, scores: scores, identities: map[string]Identity{owner.ID: owner}, joinOrder: map[string]int64{owner.ID: 1}, nextJoin: 1, muted: make(map[string]bool),
-		processed: make(map[string]Envelope), subscribers: make(map[chan Envelope]struct{}), connections: make(map[string]int), disconnectGen: make(map[string]int64), disconnectWait: 60 * time.Second, calls: make(chan actorCall),
+		processed: make(map[string]Envelope), reservations: make(map[int]string), subscribers: make(map[chan Envelope]struct{}), connections: make(map[string]int), disconnectGen: make(map[string]int64), disconnectWait: 60 * time.Second, calls: make(chan actorCall),
 		timeouts: make(chan timeoutSignal, 8), disconnects: make(chan disconnectSignal, 8), stop: make(chan struct{}), onSeatClosed: onSeatClosed, version: 1,
 	}
 	actor.appendMessage("system", fmt.Sprintf("%s 创建了房间", owner.Name))
@@ -217,7 +220,7 @@ func NewActorFromState(state PersistentState, scores AccountScores, onSeatClosed
 		identities: cloneIdentityMap(state.Identities), joinOrder: cloneInt64Map(state.JoinOrder), nextJoin: state.NextJoin,
 		muted: cloneBoolMap(state.Muted), messages: append([]SystemMessage(nil), state.Messages...), version: state.Room.Version,
 		deadline: state.Deadline, ended: state.Ended, processed: cloneEnvelopeMap(state.Processed),
-		subscribers: make(map[chan Envelope]struct{}), connections: make(map[string]int), disconnectGen: make(map[string]int64), disconnectWait: 60 * time.Second,
+		reservations: make(map[int]string), subscribers: make(map[chan Envelope]struct{}), connections: make(map[string]int), disconnectGen: make(map[string]int64), disconnectWait: 60 * time.Second,
 		calls: make(chan actorCall), timeouts: make(chan timeoutSignal, 8), disconnects: make(chan disconnectSignal, 8),
 		stop: make(chan struct{}), onSeatClosed: onSeatClosed,
 	}
@@ -262,6 +265,12 @@ func (a *Actor) Join(ctx context.Context, identity Identity, seat int) (TableSna
 		if a.ended {
 			return nil, ErrRoomClosed
 		}
+		if reservedBy := a.reservations[seat]; reservedBy != "" && reservedBy != identity.ID {
+			return nil, poker.ErrSeatOccupied
+		}
+		if a.reservations[seat] == identity.ID {
+			defer delete(a.reservations, seat)
+		}
 		sessionID, err := idgen.ID("seat")
 		if err != nil {
 			return nil, err
@@ -305,6 +314,54 @@ func (a *Actor) Join(ctx context.Context, identity Identity, seat int) (TableSna
 		return TableSnapshot{}, err
 	}
 	return value.(TableSnapshot), nil
+}
+
+func (a *Actor) ReserveSeatForSwitch(ctx context.Context, userID string, seat int) error {
+	_, err := a.call(ctx, func() (any, error) {
+		if a.ended {
+			return nil, ErrRoomClosed
+		}
+		if seat < 0 || seat >= len(a.game.Seats) || a.game.Seats[seat] != nil {
+			return nil, poker.ErrSeatOccupied
+		}
+		if a.seatFor(userID) >= 0 {
+			return nil, poker.ErrPlayerSeated
+		}
+		if reservedBy := a.reservations[seat]; reservedBy != "" && reservedBy != userID {
+			return nil, poker.ErrSeatOccupied
+		}
+		a.reservations[seat] = userID
+		return nil, nil
+	})
+	return err
+}
+
+func (a *Actor) ReleaseSeatReservation(userID string, seat int) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, _ = a.call(ctx, func() (any, error) {
+		if a.reservations[seat] == userID {
+			delete(a.reservations, seat)
+		}
+		return nil, nil
+	})
+}
+
+func (a *Actor) SeatForImmediateSwitch(ctx context.Context, userID string) (int, error) {
+	value, err := a.call(ctx, func() (any, error) {
+		seat := a.seatFor(userID)
+		if seat < 0 {
+			return nil, ErrPlayerNotSeated
+		}
+		if a.game.InHand() {
+			return nil, ErrRoomSwitchInHand
+		}
+		return seat, nil
+	})
+	if err != nil {
+		return -1, err
+	}
+	return value.(int), nil
 }
 
 func (a *Actor) Snapshot(ctx context.Context, userID string) (TableSnapshot, error) {
@@ -677,6 +734,9 @@ func (a *Actor) applyCommand(userID string, seat int, command ClientCommand) (an
 	case "room.end":
 		if userID != a.OwnerID {
 			return nil, "", ErrForbidden
+		}
+		if len(a.reservations) > 0 {
+			return nil, "", ErrRoomTransition
 		}
 		if a.game.InHand() {
 			return nil, "", poker.ErrHandInProgress
