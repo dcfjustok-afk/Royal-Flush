@@ -439,6 +439,62 @@ func TestManagerRestoresAnActiveHandAndPrivateCards(t *testing.T) {
 	}
 }
 
+func TestManagerRestoresPlayerJoinedImmediatelyBeforeRestart(t *testing.T) {
+	ctx := context.Background()
+	store := &statefulRoomStore{states: make(map[string]PersistentState)}
+	manager := NewManagerWithStore(score.NewService(nil), store)
+	actor, err := manager.Create(ctx, testConfig(), Identity{ID: "owner", Name: "房主"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Join(ctx, actor.ID, Identity{ID: "u2", Name: "刚入座玩家"}, 3); err != nil {
+		t.Fatal(err)
+	}
+	manager.Close()
+
+	restoredManager := NewManagerWithStore(score.NewService(nil), store)
+	t.Cleanup(restoredManager.Close)
+	if err := restoredManager.Restore(ctx); err != nil {
+		t.Fatal(err)
+	}
+	restoredActor, ok := restoredManager.Room(actor.ID)
+	if !ok {
+		t.Fatal("room disappeared after restart immediately following a join")
+	}
+	snapshot, err := restoredActor.Snapshot(ctx, "u2")
+	if err != nil {
+		t.Fatalf("newly joined player disappeared after restart: %v", err)
+	}
+	if playerStatus(snapshot, "u2") == "" || len(snapshot.Players) != 2 {
+		t.Fatalf("restored room lost the newly joined seat: %#v", snapshot.Players)
+	}
+}
+
+func TestJoinPersistenceFailureRestoresActorState(t *testing.T) {
+	ctx := context.Background()
+	actor, err := NewActor(testConfig(), Identity{ID: "owner", Name: "房主"}, score.NewService(nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer actor.Close()
+	before, err := actor.Snapshot(ctx, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	persistErr := errors.New("database unavailable")
+	actor.onJoin = func(SeatRecord, bool, string, Envelope, PersistentState) error { return persistErr }
+	if _, err := actor.Join(ctx, Identity{ID: "u2", Name: "玩家二"}, 2); !errors.Is(err, persistErr) {
+		t.Fatalf("expected persistence error, got %v", err)
+	}
+	after, err := actor.Snapshot(ctx, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Version != before.Version || len(after.Players) != 1 || playerStatus(after, "u2") != "" {
+		t.Fatalf("failed join leaked into actor state: before=%#v after=%#v", before, after)
+	}
+}
+
 type recordingLease struct {
 	mu       sync.Mutex
 	acquire  bool
@@ -471,6 +527,16 @@ func (s *statefulRoomStore) LoadRoomStates(context.Context) ([]PersistentState, 
 		}
 	}
 	return states, nil
+}
+
+func (s *statefulRoomStore) OpenSeatAndAppendRoomEventAndState(ctx context.Context, seat SeatRecord, claimOwnership bool, actorUserID string, event Envelope, state PersistentState) error {
+	if err := s.OpenSeat(ctx, seat, claimOwnership); err != nil {
+		return err
+	}
+	if err := s.AppendRoomEvent(ctx, actorUserID, event); err != nil {
+		return err
+	}
+	return s.SaveRoomState(ctx, state)
 }
 
 type roomSeatCopy = SeatRecord

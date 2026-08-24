@@ -163,6 +163,7 @@ type Actor struct {
 	onRoomEnded    func() error
 	onSeatOpened   func(seat SeatRecord, claimOwnership bool) error
 	onSeatRefilled func(seatSessionID string, amount int64) error
+	onJoin         func(seat SeatRecord, claimOwnership bool, actorUserID string, event Envelope, state PersistentState) error
 	onEvent        func(actorUserID string, event Envelope, state PersistentState) error
 }
 
@@ -272,6 +273,7 @@ func (a *Actor) Join(ctx context.Context, identity Identity, seat int) (TableSna
 		if a.reservations[seat] == identity.ID {
 			defer delete(a.reservations, seat)
 		}
+		checkpoint := a.persistentState()
 		sessionID, err := idgen.ID("seat")
 		if err != nil {
 			return nil, err
@@ -281,34 +283,45 @@ func (a *Actor) Join(ctx context.Context, identity Identity, seat int) (TableSna
 			return nil, err
 		}
 		claimOwnership := a.OwnerID == ""
-		if a.onSeatOpened != nil {
-			record := SeatRecord{
-				ID: player.SeatSessionID, RoomID: a.ID, UserID: player.UserID, Seat: player.Seat,
-				AllocatedPoints: player.Allocated, JoinedAt: time.Now().UTC(),
-			}
-			if err := a.onSeatOpened(record, claimOwnership); err != nil {
-				_, _ = a.game.RemoveSeat(seat)
-				return nil, err
-			}
+		record := SeatRecord{
+			ID: player.SeatSessionID, RoomID: a.ID, UserID: player.UserID, Seat: player.Seat,
+			AllocatedPoints: player.Allocated, JoinedAt: time.Now().UTC(),
 		}
 		a.identities[identity.ID] = identity
 		a.nextJoin++
 		a.joinOrder[identity.ID] = a.nextJoin
 		if claimOwnership {
-			if a.onOwnerChanged != nil && a.onSeatOpened == nil {
-				if err := a.onOwnerChanged(identity.ID); err != nil {
-					_, _ = a.game.RemoveSeat(seat)
-					delete(a.identities, identity.ID)
-					delete(a.joinOrder, identity.ID)
-					a.nextJoin--
-					return nil, err
-				}
-			}
 			a.OwnerID = identity.ID
 		}
 		a.version++
 		a.appendMessage("room", fmt.Sprintf("%s 坐入 %d 号位", identity.Name, seat+1))
-		a.publish("room.player_joined", "", map[string]any{"userId": identity.ID, "seat": seat})
+		envelope := a.makeEnvelope("room.player_joined", "", map[string]any{"userId": identity.ID, "seat": seat})
+		if a.onJoin != nil {
+			if err := a.onJoin(record, claimOwnership, identity.ID, envelope, a.persistentState()); err != nil {
+				a.restorePersistentState(checkpoint)
+				return nil, err
+			}
+		} else {
+			if a.onSeatOpened != nil {
+				if err := a.onSeatOpened(record, claimOwnership); err != nil {
+					a.restorePersistentState(checkpoint)
+					return nil, err
+				}
+			}
+			if claimOwnership && a.onOwnerChanged != nil && a.onSeatOpened == nil {
+				if err := a.onOwnerChanged(identity.ID); err != nil {
+					a.restorePersistentState(checkpoint)
+					return nil, err
+				}
+			}
+			if a.onEvent != nil {
+				if err := a.onEvent(identity.ID, envelope, a.persistentState()); err != nil {
+					a.restorePersistentState(checkpoint)
+					return nil, err
+				}
+			}
+		}
+		a.publishEnvelope(envelope)
 		return a.snapshot(identity.ID), nil
 	})
 	if err != nil {

@@ -66,6 +66,65 @@ func (p *Postgres) AppendRoomEventAndState(ctx context.Context, actorUserID stri
 	return nil
 }
 
+func (p *Postgres) OpenSeatAndAppendRoomEventAndState(ctx context.Context, seat room.SeatRecord, claimOwnership bool, actorUserID string, event room.Envelope, state room.PersistentState) error {
+	ctx, cancel := context.WithTimeout(ctx, postgresOperationTimeout)
+	defer cancel()
+	payload, err := json.Marshal(event.Payload)
+	if err != nil {
+		return fmt.Errorf("encode room event payload: %w", err)
+	}
+	rawState, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("encode room state: %w", err)
+	}
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin room join: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	if err := ensureUserTx(ctx, tx, seat.UserID, seat.JoinedAt); err != nil {
+		return err
+	}
+	if err := insertSeat(ctx, tx, seat); err != nil {
+		return err
+	}
+	if claimOwnership {
+		command, err := tx.Exec(ctx, `
+			UPDATE rooms SET owner_id = $1, status = 'waiting', empty_since = NULL
+			WHERE id = $2 AND status = 'empty' AND ended_at IS NULL`, seat.UserID, seat.RoomID)
+		if err != nil {
+			return fmt.Errorf("claim empty room ownership: %w", err)
+		}
+		if command.RowsAffected() != 1 {
+			return fmt.Errorf("claim empty room ownership: room is not empty")
+		}
+	}
+	if err := appendRoomEventTx(ctx, tx, actorUserID, event, payload); err != nil {
+		return err
+	}
+	if err := saveRoomStateTx(ctx, tx, state, rawState); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit room join: %w", err)
+	}
+	return nil
+}
+
+func appendRoomEventTx(ctx context.Context, tx pgx.Tx, actorUserID string, event room.Envelope, payload []byte) error {
+	command, err := tx.Exec(ctx, `
+		INSERT INTO room_events (room_id, version, event_type, request_id, actor_user_id, payload, created_at)
+		VALUES ($1, $2, $3, NULLIF($4, ''), NULLIF($5, ''), $6, $7)
+		ON CONFLICT DO NOTHING`, event.RoomID, event.Version, event.Type, event.RequestID, actorUserID, payload, event.SentAt)
+	if err != nil {
+		return fmt.Errorf("save room event: %w", err)
+	}
+	if command.RowsAffected() != 1 {
+		return fmt.Errorf("save room event: request already exists")
+	}
+	return nil
+}
+
 func (p *Postgres) LoadRoomStates(ctx context.Context) ([]room.PersistentState, error) {
 	ctx, cancel := context.WithTimeout(ctx, postgresOperationTimeout)
 	defer cancel()

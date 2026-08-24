@@ -56,3 +56,7 @@ type StateStore interface {
 type AtomicStateStore interface {
 	AppendRoomEventAndState(ctx context.Context, actorUserID string, event Envelope, state PersistentState) error
 }
+
+type AtomicJoinStore interface {
+	OpenSeatAndAppendRoomEventAndState(ctx context.Context, seat SeatRecord, claimOwnership bool, actorUserID string, event Envelope, state PersistentState) error
+}

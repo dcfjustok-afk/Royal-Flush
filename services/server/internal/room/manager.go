@@ -133,6 +133,18 @@ func (m *Manager) configureActor(actor *Actor) {
 		}
 		return m.store.OpenSeat(context.Background(), seat, claimOwnership)
 	}
+	actor.onJoin = func(seat SeatRecord, claimOwnership bool, actorUserID string, event Envelope, state PersistentState) error {
+		if m.store == nil {
+			return nil
+		}
+		if atomicStore, ok := m.store.(AtomicJoinStore); ok {
+			return atomicStore.OpenSeatAndAppendRoomEventAndState(context.Background(), seat, claimOwnership, actorUserID, event, state)
+		}
+		if err := m.store.OpenSeat(context.Background(), seat, claimOwnership); err != nil {
+			return err
+		}
+		return m.persistEvent(actorUserID, event, state)
+	}
 	actor.onSeatRefilled = func(seatSessionID string, amount int64) error {
 		if m.store == nil {
 			return nil
@@ -140,20 +152,24 @@ func (m *Manager) configureActor(actor *Actor) {
 		return m.store.AddSeatAllocation(context.Background(), seatSessionID, amount)
 	}
 	actor.onEvent = func(actorUserID string, event Envelope, state PersistentState) error {
-		if m.store == nil {
-			return nil
-		}
-		if atomicStore, ok := m.store.(AtomicStateStore); ok {
-			return atomicStore.AppendRoomEventAndState(context.Background(), actorUserID, event, state)
-		}
-		if err := m.store.AppendRoomEvent(context.Background(), actorUserID, event); err != nil {
-			return err
-		}
-		if stateStore, ok := m.store.(StateStore); ok {
-			return stateStore.SaveRoomState(context.Background(), state)
-		}
+		return m.persistEvent(actorUserID, event, state)
+	}
+}
+
+func (m *Manager) persistEvent(actorUserID string, event Envelope, state PersistentState) error {
+	if m.store == nil {
 		return nil
 	}
+	if atomicStore, ok := m.store.(AtomicStateStore); ok {
+		return atomicStore.AppendRoomEventAndState(context.Background(), actorUserID, event, state)
+	}
+	if err := m.store.AppendRoomEvent(context.Background(), actorUserID, event); err != nil {
+		return err
+	}
+	if stateStore, ok := m.store.(StateStore); ok {
+		return stateStore.SaveRoomState(context.Background(), state)
+	}
+	return nil
 }
 
 func (m *Manager) Restore(ctx context.Context) error {
