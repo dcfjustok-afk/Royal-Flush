@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import {
   Activity, AlertTriangle, Ban, CheckCircle2, CircleUserRound, Clock3,
-  DoorOpen, FileClock, Gauge, Inbox, KeyRound, LoaderCircle, RefreshCw, RotateCcw,
+  DoorOpen, FileClock, Gauge, Inbox, KeyRound, LoaderCircle, Radio, RefreshCw, RotateCcw,
   Search, Send, ShieldAlert, ShieldCheck, Unlock, Users, WifiOff, X, XCircle,
 } from "@lucide/vue";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
