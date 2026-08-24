@@ -359,7 +359,7 @@ func (a *Actor) applyCommand(userID string, seat int, command ClientCommand) (an
 		if err := a.game.StartHand(); err != nil {
 			return nil, "", err
 		}
-		return map[string]any{"handNumber": a.game.HandNumber, "snapshot": a.snapshot(userID)}, "game.hand_started", nil
+		return map[string]any{"handNumber": a.game.HandNumber}, "game.hand_started", nil
 	case "action.raise":
 		var payload struct {
 			Chips []int64 `json:"chips"`

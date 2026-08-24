@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -46,6 +47,36 @@ func TestActorSerializesCommandsAndKeepsConfigImmutable(t *testing.T) {
 	other, _ := actor.Snapshot(ctx, "u2")
 	if len(other.HoleCards) != 2 || (other.HoleCards[0] == snapshot.HoleCards[0] && other.HoleCards[1] == snapshot.HoleCards[1]) {
 		t.Fatal("snapshots must contain only each local player's private cards")
+	}
+}
+
+func TestHandStartedEventNeverBroadcastsPrivateCards(t *testing.T) {
+	ctx := context.Background()
+	scores := score.NewService(nil)
+	actor, err := NewActor(testConfig(), Identity{ID: "u1", Name: "小北"}, scores, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer actor.Close()
+	if _, err := actor.Join(ctx, Identity{ID: "u2", Name: "阿岚"}, 1); err != nil {
+		t.Fatal(err)
+	}
+	ready := json.RawMessage(`{"ready":true}`)
+	for _, userID := range []string{"u1", "u2"} {
+		if _, _, err := actor.Handle(ctx, userID, ClientCommand{Type: "room.ready", RequestID: "ready-" + userID, Payload: ready}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	event, _, err := actor.Handle(ctx, "u1", ClientCommand{Type: "game.start", RequestID: "start-private-check"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(event.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(payload), "holeCards") || strings.Contains(string(payload), "snapshot") {
+		t.Fatalf("shared event exposed a personalized snapshot: %s", payload)
 	}
 }
 
