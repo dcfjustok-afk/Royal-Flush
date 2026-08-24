@@ -15,6 +15,7 @@ import (
 
 const maxVoiceSignalBytes = 64 << 10
 const voiceConnectionReplaced websocket.StatusCode = 4001
+const voiceSignalQueueSize = 256
 
 type voicePeer struct {
 	UserID   string `json:"userId"`
@@ -113,13 +114,15 @@ func (h *voiceHub) relay(client *voiceClient, message voiceClientMessage) bool {
 		return false
 	}
 	event := voiceServerEvent{Type: "voice.signal", FromUserID: client.user.ID, SignalType: message.Type, Payload: message.Payload}
+	delivered := false
 	for target := range targets {
 		select {
 		case target.send <- event:
+			delivered = true
 		default:
 		}
 	}
-	return true
+	return delivered
 }
 
 func (h *voiceHub) broadcastLocked(roomID, exceptUserID string, event voiceServerEvent) {
@@ -162,7 +165,7 @@ func (s *Server) voiceEvents(writer http.ResponseWriter, request *http.Request) 
 	defer cancel()
 	unregister := s.realtime.add(user.ID, connection)
 	defer unregister()
-	client := &voiceClient{roomID: actor.ID, user: user, connection: connection, send: make(chan voiceServerEvent, 32)}
+	client := &voiceClient{roomID: actor.ID, user: user, connection: connection, send: make(chan voiceServerEvent, voiceSignalQueueSize)}
 	peers, replaced := s.voiceHub.join(client)
 	defer s.voiceHub.leave(client)
 	for _, previous := range replaced {
