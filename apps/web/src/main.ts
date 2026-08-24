@@ -7,8 +7,10 @@ import { VueQueryPlugin } from "@tanstack/vue-query";
 import { createPinia } from "pinia";
 import { createApp } from "vue";
 import App from "./App.vue";
+import { initializeTheme } from "./lib/theme";
 import { router } from "./router";
 import "./styles.css";
 
+initializeTheme();
 createApp(App).use(createPinia()).use(VueQueryPlugin).use(router).mount("#app");
 

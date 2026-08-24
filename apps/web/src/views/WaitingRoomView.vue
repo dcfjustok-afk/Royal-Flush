@@ -125,7 +125,7 @@ function selectMicrophone(event: Event) {
 <template>
   <div class="page-shell waiting-page">
     <AppHeader />
-    <main class="waiting-content">
+    <main id="main-content" class="waiting-content">
       <header class="waiting-heading"><div><span class="live-label"><VoiceMeter active />好友正在加入</span><h1>{{ store.roomConfig.name }}</h1><p>{{ store.snapshot.roomCode }} · {{ isOwner ? "你是房主" : "等待房主开局" }}</p></div><button class="button light" type="button" @click="copyInvite"><Check v-if="copied" /><Copy v-else />{{ copied ? "已复制" : "复制邀请链接" }}</button></header>
       <section class="waiting-table-area">
         <div class="waiting-table">
@@ -140,7 +140,7 @@ function selectMicrophone(event: Event) {
       </section>
       <aside class="waiting-console">
         <section><header><h2>牌局设置</h2><Settings2 /></header><dl><div><dt>人数上限</dt><dd>{{ store.roomConfig.maxPlayers }} 人</dd></div><div><dt>盲注</dt><dd>{{ store.roomConfig.blindPreset }}</dd></div><div><dt>行动时间</dt><dd>{{ store.roomConfig.actionSeconds }} 秒</dd></div><div><dt>筹码面额</dt><dd>{{ store.roomConfig.chipDenominations.join(" / ") }}</dd></div></dl></section>
-        <section><header><h2>桌内语音</h2><Headphones /></header><button class="voice-test" type="button" :disabled="store.voiceBusy || !store.roomConfig.voiceEnabled" @click="store.toggleMicrophone"><span :class="{ live: store.microphoneEnabled }"><Mic v-if="store.microphoneEnabled" /><MicOff v-else /></span><span><strong>{{ !store.roomConfig.voiceEnabled ? "房间未开启语音" : store.voiceBusy ? "正在连接" : store.microphoneEnabled ? "麦克风正常" : "麦克风已关闭" }}</strong><small>{{ store.voiceError || (store.microphoneEnabled ? (store.voiceTransport === "livekit" ? "LiveKit 云端语音已连接" : "浏览器直连语音已连接") : "点击开启") }}</small></span><VoiceMeter :active="store.microphoneEnabled" /></button><select v-if="store.microphones.length > 1" class="device-select" aria-label="麦克风设备" :value="store.selectedMicrophoneId" @change="selectMicrophone"><option v-for="device in store.microphones" :key="device.deviceId" :value="device.deviceId">{{ device.label }}</option></select></section>
+        <section><header><h2>桌内语音</h2><Headphones /></header><button class="voice-test" type="button" :disabled="store.voiceBusy || !store.roomConfig.voiceEnabled" @click="store.toggleMicrophone"><span :class="{ live: store.microphoneEnabled }"><Mic v-if="store.microphoneEnabled" /><MicOff v-else /></span><span><strong>{{ !store.roomConfig.voiceEnabled ? "房间未开启语音" : store.voiceBusy ? "正在连接" : store.microphoneEnabled ? "麦克风正常" : "麦克风已关闭" }}</strong><small>{{ store.voiceError || (store.microphoneEnabled ? (store.voiceTransport === "livekit" ? "LiveKit 云端语音已连接" : "浏览器直连语音已连接") : "点击开启") }}</small></span><VoiceMeter :active="store.microphoneEnabled" /></button><select v-if="store.microphones.length > 1" class="device-select" name="waiting-room-microphone" aria-label="麦克风设备" :value="store.selectedMicrophoneId" @change="selectMicrophone"><option v-for="device in store.microphones" :key="device.deviceId" :value="device.deviceId">{{ device.label }}</option></select></section>
         <section class="invite-link"><header><h2>邀请链接</h2><Link2 /></header><code>{{ inviteUrl }}</code></section>
         <RoomManagementPanel v-if="isOwner" @room-ended="router.push('/')" />
         <p v-if="actionError" class="form-message error">{{ actionError }}</p>

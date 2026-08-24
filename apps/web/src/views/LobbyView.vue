@@ -49,7 +49,7 @@ onMounted(async () => {
 <template>
   <div class="page-shell lobby-page">
     <AppHeader />
-    <main class="page-content">
+    <main id="main-content" class="page-content">
       <section class="lobby-command">
         <div class="lobby-heading">
           <div><h1>今晚的牌局</h1><p>好友桌、桌内语音和积分记录都在这里。</p></div>
@@ -68,7 +68,7 @@ onMounted(async () => {
       <div class="lobby-grid">
         <section class="join-section">
           <header><h2>加入好友牌局</h2><span>输入邀请中的房间码</span></header>
-          <form class="join-form" @submit.prevent="joinRoom"><label for="room-code">房间码</label><div><input id="room-code" v-model="roomCode" autocomplete="off" maxlength="7" placeholder="RF-XXXX" aria-describedby="join-error" /><button class="button primary" type="submit">进入</button></div><p v-if="joinError" id="join-error" class="form-message error">{{ joinError }}</p></form>
+          <form class="join-form" @submit.prevent="joinRoom"><label for="room-code">房间码</label><div><input id="room-code" v-model="roomCode" name="room-code" autocomplete="off" maxlength="7" placeholder="例如：RF-XXXX…" spellcheck="false" aria-describedby="join-error" /><button class="button primary" type="submit">进入房间</button></div><p v-if="joinError" id="join-error" class="form-message error" role="alert">{{ joinError }}</p></form>
         </section>
 
         <section class="score-section">

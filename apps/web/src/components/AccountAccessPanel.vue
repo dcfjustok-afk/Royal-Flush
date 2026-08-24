@@ -60,12 +60,12 @@ onMounted(() => store.probeBackend());
     <p>{{ mode === "login" ? "使用手机号与密码恢复积分、房间和身份。" : "创建后即可加入邀请房间，账号不会因服务重启丢失。" }}</p>
     <form @submit.prevent="submit">
       <label v-if="mode === 'register'" for="account-nickname">显示名称</label>
-      <input v-if="mode === 'register'" id="account-nickname" v-model="nickname" autocomplete="nickname" maxlength="20" placeholder="例如：小北" />
+      <input v-if="mode === 'register'" id="account-nickname" v-model="nickname" name="nickname" autocomplete="nickname" maxlength="20" placeholder="例如：小北…" />
       <label for="account-phone">手机号</label>
-      <input id="account-phone" v-model="phone" inputmode="tel" autocomplete="tel" maxlength="11" placeholder="138 0000 0000" />
+      <input id="account-phone" v-model="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="11" placeholder="例如：138 0000 0000…" spellcheck="false" />
       <label for="account-password">密码</label>
       <div class="password-field">
-        <input id="account-password" v-model="password" :type="showPassword ? 'text' : 'password'" :autocomplete="mode === 'login' ? 'current-password' : 'new-password'" maxlength="72" placeholder="至少 8 位，包含字母与数字" />
+        <input id="account-password" v-model="password" name="password" :type="showPassword ? 'text' : 'password'" :autocomplete="mode === 'login' ? 'current-password' : 'new-password'" maxlength="72" placeholder="至少 8 位，包含字母与数字…" />
         <button type="button" :aria-label="showPassword ? '隐藏密码' : '显示密码'" @click="showPassword = !showPassword"><EyeOff v-if="showPassword" /><Eye v-else /></button>
       </div>
       <p v-if="error" class="form-message error" role="alert">{{ error }}</p>

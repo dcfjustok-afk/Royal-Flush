@@ -58,9 +58,9 @@ async function submit() {
       <span><Flag /><strong>举报问题</strong></span><ChevronDown :class="{ open }" />
     </button>
     <form v-if="open" id="table-report-form" @submit.prevent="submit">
-      <label>问题类型<select v-model="category"><option value="conduct">行为秩序</option><option value="voice">语音问题</option><option value="technical">技术问题</option><option value="other">其他</option></select></label>
-      <label>相关玩家<select v-model="subjectUserId"><option value="">整个房间 / 无特定玩家</option><option v-for="player in reportablePlayers" :key="player.id" :value="player.id">{{ player.name }}</option></select></label>
-      <label>问题说明<textarea v-model="detail" minlength="2" maxlength="1000" rows="4" placeholder="请填写可供核查的具体情况" required /></label>
+      <label>问题类型<select v-model="category" name="report-category"><option value="conduct">行为秩序</option><option value="voice">语音问题</option><option value="technical">技术问题</option><option value="other">其他</option></select></label>
+      <label>相关玩家<select v-model="subjectUserId" name="report-subject"><option value="">整个房间 / 无特定玩家</option><option v-for="player in reportablePlayers" :key="player.id" :value="player.id">{{ player.name }}</option></select></label>
+      <label>问题说明<textarea v-model="detail" name="report-detail" minlength="2" maxlength="1000" rows="4" placeholder="请填写可供核查的具体情况…" required /></label>
       <div class="report-form-footer"><span>{{ detail.length }} / 1000</span><button class="tool-button" type="submit" :disabled="!valid"><LoaderCircle v-if="busy" class="spin" /><Send v-else />{{ busy ? "正在提交" : "提交举报" }}</button></div>
       <p v-if="error || unavailableReason" class="report-feedback error" role="alert">{{ error || unavailableReason }}</p>
       <p v-else-if="success" class="report-feedback success" role="status"><CheckCircle2 />{{ success }}</p>

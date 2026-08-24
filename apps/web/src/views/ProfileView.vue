@@ -51,7 +51,7 @@ onMounted(async () => {
 <template>
   <div class="page-shell profile-page">
     <AppHeader />
-    <main class="form-page-content">
+    <main id="main-content" class="form-page-content">
       <RouterLink class="back-link" to="/"><ArrowLeft />返回牌局大厅</RouterLink>
       <header class="profile-heading"><div><h1>积分账本</h1><p>账号、积分和当前房间均由服务端持久保存。</p></div><div class="profile-score"><span>当前局外积分</span><strong>{{ store.accountPoints?.toLocaleString("zh-CN") ?? "--" }}</strong></div></header>
       <div class="profile-grid">
@@ -59,7 +59,7 @@ onMounted(async () => {
         <aside v-if="store.currentUser" class="profile-side">
           <ScoreAddPanel />
           <section class="account-facts"><header><h2>账号档案</h2><UserRound /></header><dl><div><dt>手机号</dt><dd>{{ maskedPhone }}</dd></div><div><dt>账号 ID</dt><dd>{{ store.currentUser.id }}</dd></div><div><dt>注册时间</dt><dd>{{ store.currentUser.createdAt ? new Date(store.currentUser.createdAt).toLocaleDateString("zh-CN") : "--" }}</dd></div></dl></section>
-          <form class="profile-account-form" @submit.prevent="saveProfile"><label for="profile-nickname">牌桌显示名称</label><div><input id="profile-nickname" v-model="nickname" maxlength="20" autocomplete="nickname" /><button class="button light" type="submit" :disabled="busy || nickname.trim() === store.currentUser.nickname"><Save />保存</button></div><p v-if="message" class="form-message" :class="{ error: !message.includes('已更新'), success: message.includes('已更新') }">{{ message }}</p></form>
+          <form class="profile-account-form" @submit.prevent="saveProfile"><label for="profile-nickname">牌桌显示名称</label><div><input id="profile-nickname" v-model="nickname" name="nickname" maxlength="20" autocomplete="nickname" /><button class="button light" type="submit" :disabled="busy || nickname.trim() === store.currentUser.nickname"><Save />保存名称</button></div><p v-if="message" class="form-message" :class="{ error: !message.includes('已更新'), success: message.includes('已更新') }" aria-live="polite">{{ message }}</p></form>
           <button class="account-logout" type="button" :disabled="busy" @click="logout"><LogOut /><span><strong>退出当前账号</strong><small>此设备上的会话将立即失效</small></span></button>
         </aside>
       </div>

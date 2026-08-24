@@ -28,7 +28,7 @@ async function submit() {
 <template>
   <form class="score-add-panel" @submit.prevent="submit">
     <div><label for="score-amount">增加局外积分</label><p>不会改变当前牌桌分</p></div>
-    <div class="score-input-wrap"><input id="score-amount" v-model.number="amount" type="number" min="1" max="1000000000" step="1" inputmode="numeric" required :disabled="busy" /><button class="button primary" type="submit" :disabled="busy"><Plus />{{ busy ? "增加中" : "增加" }}</button></div>
+    <div class="score-input-wrap"><input id="score-amount" v-model.number="amount" name="score-amount" type="number" min="1" max="1000000000" step="1" inputmode="numeric" autocomplete="off" required :disabled="busy" /><button class="button primary" type="submit" :disabled="busy"><Plus />{{ busy ? "增加中…" : "增加积分" }}</button></div>
     <p v-if="error" class="form-message error"><CircleAlert />{{ error }}</p>
     <p v-else-if="success" class="form-message success" role="status">{{ success }}</p>
   </form>
