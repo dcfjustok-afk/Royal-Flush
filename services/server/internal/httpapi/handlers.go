@@ -225,6 +225,10 @@ func (s *Server) createRoom(writer http.ResponseWriter, request *http.Request) {
 		writeProblem(writer, http.StatusBadRequest, "invalid_json", "房间配置格式不正确")
 		return
 	}
+	if err := config.Validate(); err != nil {
+		writeProblem(writer, http.StatusBadRequest, "invalid_room_config", err.Error())
+		return
+	}
 	user := currentUser(request)
 	actor, err := s.rooms.Create(request.Context(), config, room.Identity{ID: user.ID, Name: user.Nickname})
 	if err != nil {

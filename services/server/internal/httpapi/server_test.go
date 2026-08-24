@@ -43,6 +43,22 @@ func TestReadinessEndpoint(t *testing.T) {
 	})
 }
 
+func TestWriteDomainErrorDoesNotExposeInternalFailure(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	writeDomainError(recorder, errors.New("save room state: ERROR: unsupported Unicode escape sequence (SQLSTATE 22P05)"))
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
+	}
+	body := recorder.Body.String()
+	if strings.Contains(body, "SQLSTATE") || strings.Contains(body, "save room state") {
+		t.Fatalf("response exposed internal error: %s", body)
+	}
+	if !strings.Contains(body, `"code":"internal_error"`) {
+		t.Fatalf("response = %s, want safe internal_error", body)
+	}
+}
+
 func TestHTTPScoreRoomAndAdminFlows(t *testing.T) {
 	server := httptest.NewServer(New(Config{Development: true}, nil).Handler())
 	defer server.Close()
