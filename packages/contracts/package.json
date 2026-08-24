@@ -9,6 +9,14 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./generated/http": {
+      "types": "./dist/generated/http.d.ts",
+      "import": "./dist/generated/http.js"
+    },
+    "./generated/websocket": {
+      "types": "./dist/generated/websocket.d.ts",
+      "import": "./dist/generated/websocket.js"
     }
   },
   "scripts": {
@@ -19,4 +27,3 @@
     "typescript": "5.9.3"
   }
 }
-

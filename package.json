@@ -13,12 +13,17 @@
     "build": "npm run build -w @royal-flush/contracts && npm run build -w @royal-flush/web && npm run build -w @royal-flush/admin",
     "typecheck": "npm run typecheck -w @royal-flush/contracts && npm run typecheck -w @royal-flush/web && npm run typecheck -w @royal-flush/admin",
     "test": "npm run test -w @royal-flush/web && npm run test -w @royal-flush/admin",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "contracts:generate": "openapi-typescript api/openapi.yaml -o packages/contracts/src/generated/http.ts && json2ts -i api/websocket.schema.json -o packages/contracts/src/generated/websocket.ts && npm run contracts:generate:go",
+    "contracts:generate:go": "go run github.com/atombender/go-jsonschema@v0.16.0 -p generated --only-models --capitalization ID -o services/server/internal/generated/websocket.go api/websocket.schema.json",
+    "contracts:check": "npm run contracts:generate && git diff --exit-code -- packages/contracts/src/generated services/server/internal/generated"
   },
   "devDependencies": {
     "@types/node": "26.2.0",
     "@playwright/test": "1.62.1",
     "concurrently": "9.2.1",
+    "json-schema-to-typescript": "15.0.4",
+    "openapi-typescript": "7.10.1",
     "typescript": "5.9.3"
   },
   "engines": {

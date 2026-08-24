@@ -25,6 +25,8 @@ export interface PlayerSnapshot {
   isSpeaking: boolean;
   isCurrentActor: boolean;
   isLocal: boolean;
+  isReady?: boolean;
+  isMuted?: boolean;
 }
 
 export interface PlayingCard {
@@ -36,6 +38,7 @@ export interface TableSnapshot {
   roomId: string;
   roomCode: string;
   roomName: string;
+  ownerId?: string;
   version: number;
   handNumber: number;
   street: "waiting" | "preflop" | "flop" | "turn" | "river" | "showdown" | "settled";
@@ -52,6 +55,9 @@ export interface TableSnapshot {
   canRaise: boolean;
   canAllIn: boolean;
   actionDeadline: string;
+  config?: RoomConfig;
+  messages?: Array<{ id: string; type: string; text: string; createdAt: string }>;
+  ended?: boolean;
 }
 
 export interface ScoreLedgerEntry {
@@ -62,6 +68,8 @@ export interface ScoreLedgerEntry {
   roomId?: string;
   note: string;
   createdAt: string;
+  epochId?: number;
+  requestId?: string;
 }
 
 export interface RoomEvent<TPayload = unknown> {
@@ -90,4 +98,3 @@ export interface ScoreResetRequest {
   confirmation: "RESET ALL SCORES";
   requestId: string;
 }
-

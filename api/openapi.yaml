@@ -1,0 +1,455 @@
+openapi: 3.1.0
+info:
+  title: Royal Flush API
+  version: 0.1.0
+  description: 熟人娱乐积分德州扑克的玩家端与运营端 HTTP API。
+servers:
+  - url: /api/v1
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      responses:
+        '200':
+          description: 服务正常
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, time]
+                properties:
+                  status: { type: string, const: ok }
+                  time: { type: string, format: date-time }
+  /auth/otp/request:
+    post:
+      operationId: requestOtp
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [phone]
+              properties:
+                phone: { type: string, pattern: '^1[3-9][0-9]{9}$' }
+      responses:
+        '200':
+          description: 验证码已发送
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [expiresAt, expiresIn]
+                properties:
+                  expiresAt: { type: string, format: date-time }
+                  expiresIn: { type: integer, const: 300 }
+                  devCode: { type: string, pattern: '^[0-9]{6}$' }
+  /auth/otp/verify:
+    post:
+      operationId: verifyOtp
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [phone, code]
+              properties:
+                phone: { type: string }
+                code: { type: string, pattern: '^[0-9]{6}$' }
+                nickname: { type: string, maxLength: 20 }
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user, balance]
+                properties:
+                  user: { $ref: '#/components/schemas/User' }
+                  balance: { type: integer, format: int64 }
+  /me:
+    get:
+      operationId: getMe
+      responses:
+        '200':
+          description: 当前账号
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user, balance, activeRoomId]
+                properties:
+                  user: { $ref: '#/components/schemas/User' }
+                  balance: { type: integer, format: int64 }
+                  activeRoomId: { type: string }
+  /me/score-additions:
+    post:
+      operationId: addScore
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScoreAdditionRequest' }
+      responses:
+        '200':
+          description: 增加成功或返回同一幂等请求的原结果
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [balance, entry]
+                properties:
+                  balance: { type: integer, format: int64 }
+                  entry: { $ref: '#/components/schemas/ScoreLedgerEntry' }
+        '429': { $ref: '#/components/responses/Problem' }
+  /me/score-ledger:
+    get:
+      operationId: getScoreLedger
+      responses:
+        '200':
+          description: 当前余额和账本
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [balance, entries]
+                properties:
+                  balance: { type: integer, format: int64 }
+                  entries:
+                    type: array
+                    items: { $ref: '#/components/schemas/ScoreLedgerEntry' }
+  /rooms:
+    post:
+      operationId: createRoom
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoomConfig' }
+      responses:
+        '201':
+          description: 房间创建成功，房主自动坐入 0 号位
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, code, config, snapshot]
+                properties:
+                  id: { type: string }
+                  code: { type: string }
+                  config: { $ref: '#/components/schemas/RoomConfig' }
+                  snapshot: { $ref: '#/components/schemas/TableSnapshot' }
+  /rooms/{roomID}/public:
+    parameters:
+      - $ref: '#/components/parameters/RoomID'
+    get:
+      operationId: getPublicRoom
+      security: []
+      responses:
+        '200':
+          description: 邀请登录页可见的房间摘要
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, code, name, ownerId, onlinePlayers, maxPlayers, config]
+                properties:
+                  id: { type: string }
+                  code: { type: string }
+                  name: { type: string }
+                  ownerId: { type: string }
+                  onlinePlayers: { type: integer }
+                  maxPlayers: { type: integer }
+                  config: { $ref: '#/components/schemas/RoomConfig' }
+  /rooms/{roomID}/join:
+    parameters:
+      - $ref: '#/components/parameters/RoomID'
+    post:
+      operationId: joinRoom
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [seat]
+              properties:
+                seat: { type: integer, minimum: 0, maximum: 7 }
+      responses:
+        '200':
+          description: 入座成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TableSnapshot' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /rooms/{roomID}/snapshot:
+    parameters:
+      - $ref: '#/components/parameters/RoomID'
+    get:
+      operationId: getRoomSnapshot
+      responses:
+        '200':
+          description: 仅含当前用户底牌的权威快照
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TableSnapshot' }
+  /rooms/{roomID}/commands:
+    parameters:
+      - $ref: '#/components/parameters/RoomID'
+    post:
+      operationId: sendRoomCommand
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoomCommand' }
+      responses:
+        '200':
+          description: 命令处理结果
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [event, duplicate]
+                properties:
+                  event: { $ref: '#/components/schemas/RoomEvent' }
+                  duplicate: { type: boolean }
+        '409': { $ref: '#/components/responses/Problem' }
+  /rooms/{roomID}/voice-token:
+    parameters:
+      - $ref: '#/components/parameters/RoomID'
+    post:
+      operationId: createVoiceToken
+      responses:
+        '200':
+          description: LiveKit 凭证或明确的禁用回退
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled]
+                properties:
+                  enabled: { type: boolean }
+                  url: { type: string }
+                  accessToken: { type: string }
+                  expiresAt: { type: string, format: date-time }
+                  reason: { type: string }
+  /admin/score-resets:
+    post:
+      operationId: resetAllScores
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScoreResetRequest' }
+      responses:
+        '200':
+          description: 新积分周期
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [epoch, baseScore, audit, duplicate]
+                properties:
+                  epoch: { type: integer, format: int64 }
+                  baseScore: { type: integer, const: 1000 }
+                  audit: { $ref: '#/components/schemas/ScoreEpoch' }
+                  duplicate: { type: boolean }
+        '403': { $ref: '#/components/responses/Problem' }
+  /admin/score-epochs:
+    get:
+      operationId: getScoreEpochs
+      responses:
+        '200':
+          description: 积分周期审计历史
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [epochs]
+                properties:
+                  epochs:
+                    type: array
+                    items: { $ref: '#/components/schemas/ScoreEpoch' }
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: rf_session
+  parameters:
+    RoomID:
+      name: roomID
+      in: path
+      required: true
+      schema: { type: string }
+  responses:
+    Problem:
+      description: 统一错误
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Problem:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string }
+        message: { type: string }
+    User:
+      type: object
+      required: [id, phone, nickname, permissions, banned, createdAt]
+      properties:
+        id: { type: string }
+        phone: { type: string }
+        nickname: { type: string }
+        permissions:
+          type: object
+          additionalProperties: { type: boolean }
+        banned: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    RoomConfig:
+      type: object
+      additionalProperties: false
+      required: [name, maxPlayers, blindPreset, actionSeconds, voiceEnabled, chipDenominations]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 32 }
+        maxPlayers: { type: integer, minimum: 2, maximum: 8 }
+        blindPreset: { type: string, enum: ['2/5', '5/10', '10/20'] }
+        actionSeconds: { type: integer, enum: [20, 30, 45] }
+        voiceEnabled: { type: boolean }
+        chipDenominations:
+          type: array
+          minItems: 5
+          maxItems: 8
+          uniqueItems: true
+          items: { type: integer, enum: [5, 10, 20, 50, 100, 200, 500, 1000] }
+    PlayingCard:
+      type: object
+      required: [rank, suit]
+      properties:
+        rank: { type: string, enum: ['2', '3', '4', '5', '6', '7', '8', '9', '10', J, Q, K, A] }
+        suit: { type: string, enum: [spades, hearts, diamonds, clubs] }
+    PlayerSnapshot:
+      type: object
+      required: [id, name, initials, seat, tablePoints, accountPoints, streetCommitted, status, isDealer, isSpeaking, isCurrentActor, isLocal, isReady, isMuted]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        initials: { type: string }
+        seat: { type: integer }
+        tablePoints: { type: integer, format: int64 }
+        accountPoints: { type: integer, format: int64 }
+        streetCommitted: { type: integer, format: int64 }
+        status: { type: string, enum: [active, folded, all-in, away, disconnected] }
+        isDealer: { type: boolean }
+        isSpeaking: { type: boolean }
+        isCurrentActor: { type: boolean }
+        isLocal: { type: boolean }
+        isReady: { type: boolean }
+        isMuted: { type: boolean }
+    SystemMessage:
+      type: object
+      required: [id, type, text, createdAt]
+      properties:
+        id: { type: string }
+        type: { type: string }
+        text: { type: string }
+        createdAt: { type: string, format: date-time }
+    TableSnapshot:
+      type: object
+      required: [roomId, roomCode, roomName, ownerId, version, handNumber, street, pot, board, holeCards, players, allowedChipDenominations, toCall, minimumRaiseBy, maximumRaiseBy, canCheck, canCall, canRaise, canAllIn, actionDeadline, config, messages, ended]
+      properties:
+        roomId: { type: string }
+        roomCode: { type: string }
+        roomName: { type: string }
+        ownerId: { type: string }
+        version: { type: integer, format: int64 }
+        handNumber: { type: integer, format: int64 }
+        street: { type: string, enum: [waiting, preflop, flop, turn, river, showdown, settled] }
+        pot: { type: integer, format: int64 }
+        board: { type: array, items: { $ref: '#/components/schemas/PlayingCard' } }
+        holeCards: { type: array, items: { $ref: '#/components/schemas/PlayingCard' }, maxItems: 2 }
+        players: { type: array, items: { $ref: '#/components/schemas/PlayerSnapshot' } }
+        allowedChipDenominations:
+          type: array
+          items: { type: integer, enum: [5, 10, 20, 50, 100, 200, 500, 1000] }
+        toCall: { type: integer, format: int64 }
+        minimumRaiseBy: { type: integer, format: int64 }
+        maximumRaiseBy: { type: integer, format: int64 }
+        canCheck: { type: boolean }
+        canCall: { type: boolean }
+        canRaise: { type: boolean }
+        canAllIn: { type: boolean }
+        actionDeadline: { type: string, format: date-time }
+        config: { $ref: '#/components/schemas/RoomConfig' }
+        messages: { type: array, items: { $ref: '#/components/schemas/SystemMessage' } }
+        ended: { type: boolean }
+    RoomCommand:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, expectedVersion, payload]
+      properties:
+        type:
+          type: string
+          enum: [room.ready, game.start, action.raise, action.call, action.check, action.fold, action.all_in, room.refill, room.leave, room.quick_message, voice.mute, room.rotate_invite, room.transfer_owner, room.end]
+        requestId: { type: string, minLength: 1 }
+        expectedVersion: { type: integer, format: int64 }
+        payload: { type: object, additionalProperties: true }
+    RoomEvent:
+      type: object
+      required: [type, requestId, roomId, version, sentAt, payload]
+      properties:
+        type: { type: string }
+        requestId: { type: string }
+        roomId: { type: string }
+        version: { type: integer, format: int64 }
+        sentAt: { type: string, format: date-time }
+        payload: true
+    ScoreAdditionRequest:
+      type: object
+      additionalProperties: false
+      required: [amount, requestId]
+      properties:
+        amount: { type: integer, minimum: 1, maximum: 1000000000 }
+        roomId: { type: string }
+        requestId: { type: string, minLength: 1 }
+    ScoreResetRequest:
+      type: object
+      additionalProperties: false
+      required: [reason, confirmation, requestId]
+      properties:
+        reason: { type: string, minLength: 1 }
+        confirmation: { type: string, const: RESET ALL SCORES }
+        requestId: { type: string, minLength: 1 }
+    ScoreLedgerEntry:
+      type: object
+      required: [id, type, amount, balance, note, createdAt, epochId]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [initial_base, self_add, game_settlement, admin_reset] }
+        amount: { type: integer, format: int64 }
+        balance: { type: integer, format: int64 }
+        roomId: { type: string }
+        note: { type: string }
+        createdAt: { type: string, format: date-time }
+        epochId: { type: integer, format: int64 }
+        requestId: { type: string }
+    ScoreEpoch:
+      type: object
+      required: [id, baseScore, administrator, reason, affectedUsers, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        baseScore: { type: integer, const: 1000 }
+        administrator: { type: string }
+        reason: { type: string }
+        affectedUsers: { type: integer }
+        createdAt: { type: string, format: date-time }
+security:
+  - sessionCookie: []
+
