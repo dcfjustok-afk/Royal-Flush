@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Activity, AlertTriangle, CheckCircle2, ChevronDown, CircleUserRound, Clock3, DoorOpen, FileClock, Gauge, Radio, RefreshCw, RotateCcw, Search, ShieldCheck, Users, X } from "@lucide/vue";
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
+import { adminApi, apiMode } from "./api";
 
 const activeSection = ref<"overview" | "users" | "rooms" | "reports" | "audit">("overview");
 const search = ref("");
@@ -8,6 +9,8 @@ const resetOpen = ref(false);
 const resetReason = ref("");
 const confirmation = ref("");
 const resetDone = ref(false);
+const resetBusy = ref(false);
+const resetError = ref("");
 const epoch = ref(4);
 
 const rooms = [
@@ -28,12 +31,26 @@ const audits = ref([
 
 const filteredUsers = computed(() => users.filter((user) => `${user.name}${user.phone}${user.room}`.toLowerCase().includes(search.value.toLowerCase())));
 
-function performReset() {
+async function performReset() {
   if (confirmation.value !== "RESET ALL SCORES" || resetReason.value.trim().length < 4) return;
-  epoch.value += 1;
-  audits.value.unshift({ time: new Date().toLocaleString("zh-CN", { hour12: false }), operator: "ops.daichi", action: "全站积分重置", detail: `Epoch ${epoch.value - 1} → ${epoch.value}，基线 1,000，${resetReason.value.trim()}`, result: "成功" });
-  resetDone.value = true;
-  window.setTimeout(() => closeReset(), 1400);
+  resetBusy.value = true;
+  resetError.value = "";
+  try {
+    const previousEpoch = epoch.value;
+    if (apiMode) {
+      const result = await adminApi.resetScores(resetReason.value.trim());
+      epoch.value = result.epoch;
+    } else {
+      epoch.value += 1;
+    }
+    audits.value.unshift({ time: new Date().toLocaleString("zh-CN", { hour12: false }), operator: "ops.daichi", action: "全站积分重置", detail: `Epoch ${previousEpoch} → ${epoch.value}，基线 1,000，${resetReason.value.trim()}`, result: "成功" });
+    resetDone.value = true;
+    window.setTimeout(() => closeReset(), 1400);
+  } catch (reason) {
+    resetError.value = reason instanceof Error ? reason.message : "积分重置失败";
+  } finally {
+    resetBusy.value = false;
+  }
 }
 
 function closeReset() {
@@ -41,7 +58,18 @@ function closeReset() {
   resetDone.value = false;
   resetReason.value = "";
   confirmation.value = "";
+  resetError.value = "";
 }
+
+onMounted(async () => {
+  if (!apiMode) return;
+  try {
+    const result = await adminApi.epochs();
+    if (result.epochs[0]) epoch.value = result.epochs[0].id;
+  } catch {
+    // Keep the audit shell usable when the API is offline.
+  }
+});
 </script>
 
 <template>
@@ -86,10 +114,9 @@ function closeReset() {
     <div v-if="resetOpen" class="modal-backdrop" @click.self="closeReset">
       <section class="reset-dialog" role="dialog" aria-modal="true" aria-labelledby="reset-title">
         <header><span><AlertTriangle /></span><div><h2 id="reset-title">重置全站积分</h2><p>所有账号将立即进入新的积分周期。</p></div><button type="button" aria-label="关闭" @click="closeReset"><X /></button></header>
-        <template v-if="!resetDone"><div class="reset-impact"><strong>不会中断活跃牌局</strong><p>当前余额统一变为 1,000；进行中牌局结束后，净输赢继续结算到新周期。</p></div><label>重置原因<textarea v-model="resetReason" rows="3" placeholder="至少填写 4 个字" /></label><label>输入 RESET ALL SCORES 确认<input v-model="confirmation" autocomplete="off" /></label><footer><button class="tool-button" type="button" @click="closeReset">取消</button><button class="danger-button" type="button" :disabled="confirmation !== 'RESET ALL SCORES' || resetReason.trim().length < 4" @click="performReset"><RotateCcw />确认重置</button></footer></template>
+        <template v-if="!resetDone"><div class="reset-impact"><strong>不会中断活跃牌局</strong><p>当前余额统一变为 1,000；进行中牌局结束后，净输赢继续结算到新周期。</p></div><label>重置原因<textarea v-model="resetReason" rows="3" placeholder="至少填写 4 个字" /></label><label>输入 RESET ALL SCORES 确认<input v-model="confirmation" autocomplete="off" /></label><p v-if="resetError" class="reset-error">{{ resetError }}</p><footer><button class="tool-button" type="button" @click="closeReset">取消</button><button class="danger-button" type="button" :disabled="resetBusy || confirmation !== 'RESET ALL SCORES' || resetReason.trim().length < 4" @click="performReset"><RotateCcw />{{ resetBusy ? "正在重置" : "确认重置" }}</button></footer></template>
         <div v-else class="reset-success" role="status"><CheckCircle2 /><strong>重置已完成</strong><span>当前积分周期为 Epoch {{ epoch }}</span></div>
       </section>
     </div>
   </div>
 </template>
-

@@ -92,3 +92,4 @@ h1,h2,p { margin:0; }
 .reset-success { display:grid; min-height:220px; place-content:center; justify-items:center; gap:9px; color:var(--mint); }
 .reset-success svg { width:36px; height:36px; }
 .reset-success span { color:var(--muted); font-size:10px; }
+.reset-error { margin-top:10px; color:#ff8e82; font-size:10px; }
