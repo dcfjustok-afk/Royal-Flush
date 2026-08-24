@@ -33,6 +33,7 @@ const ClientCommandTypeRoomLeave ClientCommandType = "room.leave"
 const ClientCommandTypeRoomQuickMessage ClientCommandType = "room.quick_message"
 const ClientCommandTypeRoomReady ClientCommandType = "room.ready"
 const ClientCommandTypeRoomRefill ClientCommandType = "room.refill"
+const ClientCommandTypeRoomRemovePlayer ClientCommandType = "room.remove_player"
 const ClientCommandTypeRoomRotateInvite ClientCommandType = "room.rotate_invite"
 const ClientCommandTypeRoomTransferOwner ClientCommandType = "room.transfer_owner"
 const ClientCommandTypeVoiceMute ClientCommandType = "voice.mute"
@@ -67,6 +68,11 @@ type ReadyPayload struct {
 	Ready bool `json:"ready" yaml:"ready" mapstructure:"ready"`
 }
 
+type RemovePlayerPayload struct {
+	// UserID corresponds to the JSON schema field "userId".
+	UserID string `json:"userId" yaml:"userId" mapstructure:"userId"`
+}
+
 type RoomEvent struct {
 	// Payload corresponds to the JSON schema field "payload".
 	Payload interface{} `json:"payload" yaml:"payload" mapstructure:"payload"`
@@ -98,6 +104,7 @@ const RoomEventTypeRoomInviteRotated RoomEventType = "room.invite_rotated"
 const RoomEventTypeRoomOwnerTransferred RoomEventType = "room.owner_transferred"
 const RoomEventTypeRoomPlayerJoined RoomEventType = "room.player_joined"
 const RoomEventTypeRoomPlayerLeaving RoomEventType = "room.player_leaving"
+const RoomEventTypeRoomPlayerRemoved RoomEventType = "room.player_removed"
 const RoomEventTypeRoomQuickMessage RoomEventType = "room.quick_message"
 const RoomEventTypeRoomReadyChanged RoomEventType = "room.ready_changed"
 const RoomEventTypeRoomTablePointsRefilled RoomEventType = "room.table_points_refilled"

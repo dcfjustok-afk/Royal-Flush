@@ -21,6 +21,7 @@ export interface ClientCommand {
     | "room.leave"
     | "room.quick_message"
     | "voice.mute"
+    | "room.remove_player"
     | "room.rotate_invite"
     | "room.transfer_owner"
     | "room.end";
@@ -31,6 +32,7 @@ export interface ClientCommand {
     | ReadyPayload
     | QuickMessagePayload
     | MutePayload
+    | RemovePlayerPayload
     | TransferOwnerPayload
     | {
         [k: string]: unknown;
@@ -52,6 +54,9 @@ export interface MutePayload {
   userId: string;
   muted: boolean;
 }
+export interface RemovePlayerPayload {
+  userId: string;
+}
 export interface TransferOwnerPayload {
   userId: string;
 }
@@ -61,6 +66,7 @@ export interface RoomEvent {
     | "room.player_joined"
     | "room.ready_changed"
     | "room.player_leaving"
+    | "room.player_removed"
     | "room.table_points_refilled"
     | "room.quick_message"
     | "room.invite_rotated"

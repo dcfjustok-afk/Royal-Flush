@@ -166,6 +166,8 @@ func writeDomainError(writer http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, room.ErrForbidden):
 		status, code = http.StatusForbidden, "forbidden"
+	case errors.Is(err, room.ErrCannotRemoveOwner):
+		status, code = http.StatusBadRequest, "cannot_remove_owner"
 	case errors.Is(err, room.ErrVersionConflict):
 		status, code = http.StatusConflict, "version_conflict"
 	case errors.Is(err, room.ErrPlayerNotSeated):

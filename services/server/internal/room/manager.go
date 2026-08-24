@@ -32,6 +32,9 @@ func (m *Manager) Create(_ context.Context, config Config, owner Identity) (*Act
 	if err != nil {
 		return nil, err
 	}
+	actor.onCodeChanged = func(oldCode, newCode string) {
+		m.updateRoomCode(actor, oldCode, newCode)
+	}
 	m.rooms[actor.ID] = actor
 	m.byCode[actor.Code] = actor
 	m.activeSeat[owner.ID] = actor.ID
@@ -98,4 +101,13 @@ func (m *Manager) releaseSeat(userID string) {
 	m.mu.Lock()
 	delete(m.activeSeat, userID)
 	m.mu.Unlock()
+}
+
+func (m *Manager) updateRoomCode(actor *Actor, oldCode, newCode string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.byCode[oldCode] == actor {
+		delete(m.byCode, oldCode)
+	}
+	m.byCode[newCode] = actor
 }

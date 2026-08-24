@@ -335,7 +335,7 @@ export interface components {
         };
         RoomCommand: {
             /** @enum {string} */
-            type: "room.ready" | "game.start" | "action.raise" | "action.call" | "action.check" | "action.fold" | "action.all_in" | "room.refill" | "room.leave" | "room.quick_message" | "voice.mute" | "room.rotate_invite" | "room.transfer_owner" | "room.end";
+            type: "room.ready" | "game.start" | "action.raise" | "action.call" | "action.check" | "action.fold" | "action.all_in" | "room.refill" | "room.leave" | "room.quick_message" | "voice.mute" | "room.remove_player" | "room.rotate_invite" | "room.transfer_owner" | "room.end";
             requestId: string;
             /** Format: int64 */
             expectedVersion: number;

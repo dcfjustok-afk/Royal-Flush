@@ -401,7 +401,7 @@ components:
       properties:
         type:
           type: string
-          enum: [room.ready, game.start, action.raise, action.call, action.check, action.fold, action.all_in, room.refill, room.leave, room.quick_message, voice.mute, room.rotate_invite, room.transfer_owner, room.end]
+          enum: [room.ready, game.start, action.raise, action.call, action.check, action.fold, action.all_in, room.refill, room.leave, room.quick_message, voice.mute, room.remove_player, room.rotate_invite, room.transfer_owner, room.end]
         requestId: { type: string, minLength: 1 }
         expectedVersion: { type: integer, format: int64 }
         payload: { type: object, additionalProperties: true }

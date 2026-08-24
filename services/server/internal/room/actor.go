@@ -17,6 +17,7 @@ import (
 var (
 	ErrRoomClosed          = errors.New("room is closed")
 	ErrForbidden           = errors.New("only the room owner can perform this operation")
+	ErrCannotRemoveOwner   = errors.New("the room owner cannot remove themselves")
 	ErrVersionConflict     = errors.New("room version does not match expectedVersion")
 	ErrPlayerNotSeated     = errors.New("player is not seated in this room")
 	ErrPlayersNotReady     = errors.New("at least two ready players are required")
@@ -125,21 +126,24 @@ type Actor struct {
 	OwnerID   string
 	CreatedAt time.Time
 
-	config       Config
-	game         *poker.Game
-	scores       AccountScores
-	identities   map[string]Identity
-	muted        map[string]bool
-	messages     []SystemMessage
-	version      int64
-	deadline     time.Time
-	ended        bool
-	processed    map[string]Envelope
-	subscribers  map[chan Envelope]struct{}
-	calls        chan actorCall
-	timeouts     chan timeoutSignal
-	stop         chan struct{}
-	onSeatClosed func(userID string)
+	config        Config
+	game          *poker.Game
+	scores        AccountScores
+	identities    map[string]Identity
+	joinOrder     map[string]int64
+	nextJoin      int64
+	muted         map[string]bool
+	messages      []SystemMessage
+	version       int64
+	deadline      time.Time
+	ended         bool
+	processed     map[string]Envelope
+	subscribers   map[chan Envelope]struct{}
+	calls         chan actorCall
+	timeouts      chan timeoutSignal
+	stop          chan struct{}
+	onSeatClosed  func(userID string)
+	onCodeChanged func(oldCode, newCode string)
 }
 
 func NewActor(config Config, owner Identity, scores AccountScores, onSeatClosed func(string)) (*Actor, error) {
@@ -171,7 +175,7 @@ func NewActor(config Config, owner Identity, scores AccountScores, onSeatClosed 
 	}
 	actor := &Actor{
 		ID: id, Code: code, OwnerID: owner.ID, CreatedAt: time.Now().UTC(), config: cloneConfig(config),
-		game: game, scores: scores, identities: map[string]Identity{owner.ID: owner}, muted: make(map[string]bool),
+		game: game, scores: scores, identities: map[string]Identity{owner.ID: owner}, joinOrder: map[string]int64{owner.ID: 1}, nextJoin: 1, muted: make(map[string]bool),
 		processed: make(map[string]Envelope), subscribers: make(map[chan Envelope]struct{}), calls: make(chan actorCall),
 		timeouts: make(chan timeoutSignal, 8), stop: make(chan struct{}), onSeatClosed: onSeatClosed, version: 1,
 	}
@@ -202,6 +206,8 @@ func (a *Actor) Join(ctx context.Context, identity Identity, seat int) (TableSna
 			return nil, err
 		}
 		a.identities[identity.ID] = identity
+		a.nextJoin++
+		a.joinOrder[identity.ID] = a.nextJoin
 		a.version++
 		a.appendMessage("room", fmt.Sprintf("%s 坐入 %d 号位", identity.Name, seat+1))
 		a.publish("room.player_joined", "", map[string]any{"userId": identity.ID, "seat": seat})
@@ -431,6 +437,28 @@ func (a *Actor) applyCommand(userID string, seat int, command ClientCommand) (an
 		}
 		a.muted[payload.UserID] = payload.Muted
 		return payload, "voice.mute_changed", nil
+	case "room.remove_player":
+		if userID != a.OwnerID {
+			return nil, "", ErrForbidden
+		}
+		var payload struct {
+			UserID string `json:"userId"`
+		}
+		if err := json.Unmarshal(command.Payload, &payload); err != nil {
+			return nil, "", err
+		}
+		if payload.UserID == a.OwnerID {
+			return nil, "", ErrCannotRemoveOwner
+		}
+		targetSeat := a.seatFor(payload.UserID)
+		if targetSeat < 0 {
+			return nil, "", ErrPlayerNotSeated
+		}
+		if err := a.game.Withdraw(targetSeat); err != nil {
+			return nil, "", err
+		}
+		a.appendMessage("room", fmt.Sprintf("%s 被房主移出房间", a.identities[payload.UserID].Name))
+		return payload, "room.player_removed", nil
 	case "room.rotate_invite":
 		if userID != a.OwnerID {
 			return nil, "", ErrForbidden
@@ -439,7 +467,11 @@ func (a *Actor) applyCommand(userID string, seat int, command ClientCommand) (an
 		if err != nil {
 			return nil, "", err
 		}
+		oldCode := a.Code
 		a.Code = code
+		if a.onCodeChanged != nil {
+			a.onCodeChanged(oldCode, code)
+		}
 		return map[string]any{"roomCode": code}, "room.invite_rotated", nil
 	case "room.transfer_owner":
 		if userID != a.OwnerID {
@@ -620,6 +652,7 @@ func (a *Actor) settleSeat(seat int) {
 		a.publish("score.settlement_applied", player.SeatSessionID, map[string]any{"userId": player.UserID, "net": net, "balance": result.Balance})
 	}
 	delete(a.identities, player.UserID)
+	delete(a.joinOrder, player.UserID)
 	delete(a.muted, player.UserID)
 	if a.onSeatClosed != nil {
 		a.onSeatClosed(player.UserID)
@@ -630,12 +663,22 @@ func (a *Actor) settleSeat(seat int) {
 }
 
 func (a *Actor) transferOwnerAfterDeparture() {
+	var candidate *poker.Player
+	var candidateOrder int64
 	for _, player := range a.game.Seats {
-		if player != nil && !player.Disconnected && !player.Leaving {
-			a.OwnerID = player.UserID
-			a.publish("room.owner_transferred", "", map[string]any{"userId": player.UserID, "automatic": true})
-			return
+		if player == nil || player.Disconnected || player.Leaving {
+			continue
 		}
+		order := a.joinOrder[player.UserID]
+		if candidate == nil || order < candidateOrder {
+			candidate = player
+			candidateOrder = order
+		}
+	}
+	if candidate != nil {
+		a.OwnerID = candidate.UserID
+		a.publish("room.owner_transferred", "", map[string]any{"userId": candidate.UserID, "automatic": true})
+		return
 	}
 	a.OwnerID = ""
 }

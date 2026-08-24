@@ -80,6 +80,67 @@ func TestHandStartedEventNeverBroadcastsPrivateCards(t *testing.T) {
 	}
 }
 
+func TestRoomOwnerControlsAndAutomaticTransferUseJoinOrder(t *testing.T) {
+	ctx := context.Background()
+	manager := NewManager(score.NewService(nil))
+	actor, err := manager.Create(ctx, testConfig(), Identity{ID: "owner", Name: "房主"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer actor.Close()
+	if _, err := manager.Join(ctx, actor.ID, Identity{ID: "early", Name: "先到玩家"}, 6); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Join(ctx, actor.ID, Identity{ID: "late", Name: "后到玩家"}, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	removeLate := json.RawMessage(`{"userId":"late"}`)
+	if _, _, err := actor.Handle(ctx, "early", ClientCommand{Type: "room.remove_player", RequestID: "remove-forbidden", Payload: removeLate}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("non-owner removal should be forbidden, got %v", err)
+	}
+	removeOwner := json.RawMessage(`{"userId":"owner"}`)
+	if _, _, err := actor.Handle(ctx, "owner", ClientCommand{Type: "room.remove_player", RequestID: "remove-owner", Payload: removeOwner}); !errors.Is(err, ErrCannotRemoveOwner) {
+		t.Fatalf("owner should not remove themselves, got %v", err)
+	}
+	if _, _, err := actor.Handle(ctx, "owner", ClientCommand{Type: "room.remove_player", RequestID: "remove-late", Payload: removeLate}); err != nil {
+		t.Fatal(err)
+	}
+	if manager.ActiveRoom("late") != "" {
+		t.Fatal("removed player still owns an active seat")
+	}
+	if _, _, err := actor.Handle(ctx, "owner", ClientCommand{Type: "room.leave", RequestID: "owner-leaves"}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := actor.Snapshot(ctx, "early")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.OwnerID != "early" {
+		t.Fatalf("owner transferred by seat order instead of join order: %s", snapshot.OwnerID)
+	}
+}
+
+func TestRotatingInviteCodeInvalidatesThePreviousCode(t *testing.T) {
+	ctx := context.Background()
+	manager := NewManager(score.NewService(nil))
+	actor, err := manager.Create(ctx, testConfig(), Identity{ID: "owner", Name: "房主"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer actor.Close()
+	oldCode := actor.Code
+	if _, _, err := actor.Handle(ctx, "owner", ClientCommand{Type: "room.rotate_invite", RequestID: "rotate-code"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := manager.Room(oldCode); ok {
+		t.Fatal("previous invite code still resolves after rotation")
+	}
+	if resolved, ok := manager.Room(actor.Code); !ok || resolved != actor {
+		t.Fatal("new invite code does not resolve to the room")
+	}
+}
+
 func TestRaiseValidationVersionAndIdempotency(t *testing.T) {
 	ctx := context.Background()
 	scores := score.NewService(nil)
