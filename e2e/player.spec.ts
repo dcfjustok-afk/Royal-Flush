@@ -355,6 +355,29 @@ test("牌桌在目标视口内保持完整且筹码不会改变布局", async ({
   await expectInsideViewport(page.getByRole("button", { name: /确认加注 20/ }), page);
 });
 
+test("房间状态与当前路由不一致时会进入正确页面", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1440", "代表性桌面项目覆盖跨设备开局与陈旧路由");
+
+  await page.goto("/rooms/room-saturday/waiting");
+  await expect(page).toHaveURL(/\/rooms\/room-saturday\/table$/);
+  await expect(page.locator(".table-app")).toBeVisible();
+
+  const waiting = structuredClone(playerSnapshot);
+  waiting.street = "waiting";
+  waiting.handNumber = 0;
+  waiting.board = [];
+  waiting.holeCards = [];
+  waiting.players.forEach((player) => (player.isCurrentActor = false));
+  await page.route("**/api/v1/rooms/room-saturday/snapshot", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify(waiting),
+  }));
+  await page.goto("/rooms/room-saturday/table");
+  await expect(page).toHaveURL(/\/rooms\/room-saturday\/waiting$/);
+  await expect(page.getByRole("heading", { name: "周六夜场" })).toBeVisible();
+});
+
 test("键盘可以完成房间码跳转和大额筹码配置", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1440", "代表性桌面项目覆盖键盘工作流");
   await page.goto("/");

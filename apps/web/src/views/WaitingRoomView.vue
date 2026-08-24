@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Check, Copy, Headphones, Link2, Mic, MicOff, Play, Settings2, UserPlus } from "@lucide/vue";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
 import AppHeader from "@/components/AppHeader.vue";
 import RoomManagementPanel from "@/components/RoomManagementPanel.vue";
@@ -22,6 +22,12 @@ const seats = computed(() => Array.from({ length: 8 }, (_, seat) => ({
   player: store.snapshot.players.find((player) => player.seat === seat),
   available: seat < store.roomConfig.maxPlayers,
 })));
+
+watch(() => [store.snapshot.roomId, store.snapshot.street] as const, ([roomId, street]) => {
+  if (street !== "waiting" && roomId === String(route.params.id) && route.name === "waiting-room") {
+    void router.replace(`/rooms/${roomId}/table`);
+  }
+});
 
 async function copyInvite() {
   await navigator.clipboard.writeText(inviteUrl.value).catch(() => undefined);

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ChipDenomination } from "@royal-flush/contracts";
 import { ArrowLeft, Clock3, Copy, History, Mic, MicOff, PanelRightClose, Play, Radio, RefreshCw, Settings, Signal, Users, Wifi, WifiOff } from "@lucide/vue";
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import BrandMark from "@/components/BrandMark.vue";
 import ChipComposer from "@/components/ChipComposer.vue";
@@ -39,6 +39,12 @@ const canStartNextHand = computed(() => handSettled.value && isOwner.value && re
 const canAct = computed(() => acting.value && !store.commandPending && store.connectionState === "connected");
 const connectionLabel = computed(() => ({ offline: "实时连接离线", connecting: "正在连接牌桌", connected: "连接稳定", reconnecting: "正在恢复牌桌" })[store.connectionState]);
 const voiceConnectionLabel = computed(() => store.voiceConnected ? (store.voiceTransport === "livekit" ? "云端语音已连接" : "直连语音已连接") : "语音未连接");
+
+watch(() => [store.snapshot.roomId, store.snapshot.street] as const, ([roomId, street]) => {
+  if (street === "waiting" && roomId === String(route.params.id) && route.name === "table") {
+    void router.replace(`/rooms/${roomId}/waiting`);
+  }
+});
 
 function playerForSeat(seat: number) {
   return store.snapshot.players.find((player) => player.seat === seat);
