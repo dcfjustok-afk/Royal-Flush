@@ -141,6 +141,94 @@ func TestRotatingInviteCodeInvalidatesThePreviousCode(t *testing.T) {
 	}
 }
 
+func TestDisconnectedSeatIsRetainedAndMultipleConnectionsAreCounted(t *testing.T) {
+	ctx := context.Background()
+	actor, err := NewActor(testConfig(), Identity{ID: "u1", Name: "房主"}, score.NewService(nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer actor.Close()
+	actor.disconnectWait = 20 * time.Millisecond
+	if _, err := actor.Join(ctx, Identity{ID: "u2", Name: "阿岚"}, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := actor.PlayerConnected(ctx, "u2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := actor.PlayerConnected(ctx, "u2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := actor.PlayerDisconnected(ctx, "u2"); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _ := actor.Snapshot(ctx, "u1")
+	if playerStatus(snapshot, "u2") == "disconnected" {
+		t.Fatal("closing one of multiple connections marked the player disconnected")
+	}
+	if err := actor.PlayerDisconnected(ctx, "u2"); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _ = actor.Snapshot(ctx, "u1")
+	if playerStatus(snapshot, "u2") != "disconnected" {
+		t.Fatal("last connection close did not mark the player disconnected")
+	}
+	if err := actor.PlayerConnected(ctx, "u2"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(30 * time.Millisecond)
+	snapshot, _ = actor.Snapshot(ctx, "u1")
+	if playerStatus(snapshot, "u2") == "" {
+		t.Fatal("reconnected player lost the retained seat")
+	}
+	if err := actor.PlayerDisconnected(ctx, "u2"); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		snapshot, _ = actor.Snapshot(ctx, "u1")
+		if playerStatus(snapshot, "u2") == "" {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("disconnected seat was not released after the retention window")
+}
+
+func TestEmptyRoomExpiresUnlessAnotherPlayerJoins(t *testing.T) {
+	ctx := context.Background()
+	manager := NewManager(score.NewService(nil))
+	manager.emptyWait = 20 * time.Millisecond
+	actor, err := manager.Create(ctx, testConfig(), Identity{ID: "owner", Name: "房主"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := actor.Handle(ctx, "owner", ClientCommand{Type: "room.leave", RequestID: "leave-empty"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Join(ctx, actor.Code, Identity{ID: "u2", Name: "接替玩家"}, 3); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(30 * time.Millisecond)
+	if _, ok := manager.Room(actor.ID); !ok {
+		t.Fatal("room expired after its empty timer was cancelled")
+	}
+	snapshot, err := actor.Snapshot(ctx, "u2")
+	if err != nil || snapshot.OwnerID != "u2" {
+		t.Fatalf("first player returning to an empty room did not become owner: %#v %v", snapshot, err)
+	}
+	if _, _, err := actor.Handle(ctx, "u2", ClientCommand{Type: "room.leave", RequestID: "leave-expire"}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if _, ok := manager.Room(actor.ID); !ok {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("empty room was not expired after the retention window")
+}
+
 func TestRaiseValidationVersionAndIdempotency(t *testing.T) {
 	ctx := context.Background()
 	scores := score.NewService(nil)
@@ -212,6 +300,15 @@ func localPlayer(snapshot TableSnapshot) PlayerSnapshot {
 		}
 	}
 	return PlayerSnapshot{}
+}
+
+func playerStatus(snapshot TableSnapshot, userID string) string {
+	for _, player := range snapshot.Players {
+		if player.ID == userID {
+			return player.Status
+		}
+	}
+	return ""
 }
 
 func testConfig() Config {

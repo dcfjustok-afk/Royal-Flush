@@ -64,6 +64,8 @@ export interface RoomEvent {
   type:
     | "table.snapshot"
     | "room.player_joined"
+    | "room.player_disconnected"
+    | "room.player_reconnected"
     | "room.ready_changed"
     | "room.player_leaving"
     | "room.player_removed"

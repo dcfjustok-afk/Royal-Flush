@@ -31,6 +31,11 @@ func (s *Server) roomEvents(writer http.ResponseWriter, request *http.Request) {
 	connection.SetReadLimit(1 << 20)
 	ctx, cancel := context.WithCancel(request.Context())
 	defer cancel()
+	if err := actor.PlayerConnected(ctx, user.ID); err != nil {
+		_ = connection.Close(websocket.StatusPolicyViolation, "player is not seated")
+		return
+	}
+	defer func() { _ = actor.PlayerDisconnected(context.Background(), user.ID) }()
 	events, unsubscribe, err := actor.Subscribe(ctx)
 	if err != nil {
 		_ = connection.Close(websocket.StatusInternalError, "subscription failed")

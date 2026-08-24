@@ -120,30 +120,39 @@ type timeoutSignal struct {
 	seat    int
 }
 
+type disconnectSignal struct {
+	userID     string
+	generation int64
+}
+
 type Actor struct {
 	ID        string
 	Code      string
 	OwnerID   string
 	CreatedAt time.Time
 
-	config        Config
-	game          *poker.Game
-	scores        AccountScores
-	identities    map[string]Identity
-	joinOrder     map[string]int64
-	nextJoin      int64
-	muted         map[string]bool
-	messages      []SystemMessage
-	version       int64
-	deadline      time.Time
-	ended         bool
-	processed     map[string]Envelope
-	subscribers   map[chan Envelope]struct{}
-	calls         chan actorCall
-	timeouts      chan timeoutSignal
-	stop          chan struct{}
-	onSeatClosed  func(userID string)
-	onCodeChanged func(oldCode, newCode string)
+	config         Config
+	game           *poker.Game
+	scores         AccountScores
+	identities     map[string]Identity
+	joinOrder      map[string]int64
+	nextJoin       int64
+	muted          map[string]bool
+	messages       []SystemMessage
+	version        int64
+	deadline       time.Time
+	ended          bool
+	processed      map[string]Envelope
+	subscribers    map[chan Envelope]struct{}
+	connections    map[string]int
+	disconnectGen  map[string]int64
+	disconnectWait time.Duration
+	calls          chan actorCall
+	timeouts       chan timeoutSignal
+	disconnects    chan disconnectSignal
+	stop           chan struct{}
+	onSeatClosed   func(userID string)
+	onCodeChanged  func(oldCode, newCode string)
 }
 
 func NewActor(config Config, owner Identity, scores AccountScores, onSeatClosed func(string)) (*Actor, error) {
@@ -176,8 +185,8 @@ func NewActor(config Config, owner Identity, scores AccountScores, onSeatClosed 
 	actor := &Actor{
 		ID: id, Code: code, OwnerID: owner.ID, CreatedAt: time.Now().UTC(), config: cloneConfig(config),
 		game: game, scores: scores, identities: map[string]Identity{owner.ID: owner}, joinOrder: map[string]int64{owner.ID: 1}, nextJoin: 1, muted: make(map[string]bool),
-		processed: make(map[string]Envelope), subscribers: make(map[chan Envelope]struct{}), calls: make(chan actorCall),
-		timeouts: make(chan timeoutSignal, 8), stop: make(chan struct{}), onSeatClosed: onSeatClosed, version: 1,
+		processed: make(map[string]Envelope), subscribers: make(map[chan Envelope]struct{}), connections: make(map[string]int), disconnectGen: make(map[string]int64), disconnectWait: 60 * time.Second, calls: make(chan actorCall),
+		timeouts: make(chan timeoutSignal, 8), disconnects: make(chan disconnectSignal, 8), stop: make(chan struct{}), onSeatClosed: onSeatClosed, version: 1,
 	}
 	actor.appendMessage("system", fmt.Sprintf("%s 创建了房间", owner.Name))
 	go actor.loop()
@@ -208,6 +217,9 @@ func (a *Actor) Join(ctx context.Context, identity Identity, seat int) (TableSna
 		a.identities[identity.ID] = identity
 		a.nextJoin++
 		a.joinOrder[identity.ID] = a.nextJoin
+		if a.OwnerID == "" {
+			a.OwnerID = identity.ID
+		}
 		a.version++
 		a.appendMessage("room", fmt.Sprintf("%s 坐入 %d 号位", identity.Name, seat+1))
 		a.publish("room.player_joined", "", map[string]any{"userId": identity.ID, "seat": seat})
@@ -304,6 +316,57 @@ func (a *Actor) Subscribe(ctx context.Context) (<-chan Envelope, func(), error) 
 		})
 	}
 	return channel, cancel, nil
+}
+
+func (a *Actor) PlayerConnected(ctx context.Context, userID string) error {
+	_, err := a.call(ctx, func() (any, error) {
+		seat := a.seatFor(userID)
+		if seat < 0 {
+			return nil, ErrPlayerNotSeated
+		}
+		a.connections[userID]++
+		a.disconnectGen[userID]++
+		player := a.game.Seats[seat]
+		if player.Disconnected {
+			if err := a.game.SetDisconnected(seat, false); err != nil {
+				return nil, err
+			}
+			a.version++
+			a.publish("room.player_reconnected", "", map[string]any{"userId": userID})
+		}
+		return nil, nil
+	})
+	return err
+}
+
+func (a *Actor) PlayerDisconnected(ctx context.Context, userID string) error {
+	_, err := a.call(ctx, func() (any, error) {
+		seat := a.seatFor(userID)
+		if seat < 0 {
+			return nil, ErrPlayerNotSeated
+		}
+		if a.connections[userID] > 0 {
+			a.connections[userID]--
+		}
+		if a.connections[userID] > 0 || a.game.Seats[seat].Disconnected {
+			return nil, nil
+		}
+		if err := a.game.SetDisconnected(seat, true); err != nil {
+			return nil, err
+		}
+		a.version++
+		a.publish("room.player_disconnected", "", map[string]any{"userId": userID, "retainedSeconds": int(a.disconnectWait.Seconds())})
+		a.disconnectGen[userID]++
+		signal := disconnectSignal{userID: userID, generation: a.disconnectGen[userID]}
+		time.AfterFunc(a.disconnectWait, func() {
+			select {
+			case a.disconnects <- signal:
+			case <-a.stop:
+			}
+		})
+		return nil, nil
+	})
+	return err
 }
 
 func (a *Actor) BroadcastScoreAddition(ctx context.Context, userID, requestID string, amount, balance int64) error {
@@ -560,6 +623,8 @@ func (a *Actor) loop() {
 			call.response <- actorResponse{value: value, err: err}
 		case signal := <-a.timeouts:
 			a.handleTimeout(signal)
+		case signal := <-a.disconnects:
+			a.handleDisconnectTimeout(signal)
 		case <-a.stop:
 			for channel := range a.subscribers {
 				close(channel)
@@ -616,6 +681,27 @@ func (a *Actor) handleTimeout(signal timeoutSignal) {
 	}
 }
 
+func (a *Actor) handleDisconnectTimeout(signal disconnectSignal) {
+	if a.ended || a.disconnectGen[signal.userID] != signal.generation || a.connections[signal.userID] > 0 {
+		return
+	}
+	seat := a.seatFor(signal.userID)
+	if seat < 0 || !a.game.Seats[seat].Disconnected {
+		return
+	}
+	if err := a.game.Withdraw(seat); err != nil {
+		return
+	}
+	a.version++
+	a.publish("room.player_leaving", "", map[string]any{"userId": signal.userID, "reason": "disconnect_timeout"})
+	if a.game.InHand() && a.game.Actor >= 0 {
+		a.scheduleActionTimeout()
+	}
+	if !a.game.InHand() {
+		a.settleLeaving()
+	}
+}
+
 func (a *Actor) seatFor(userID string) int {
 	for seat, player := range a.game.Seats {
 		if player != nil && player.UserID == userID {
@@ -654,6 +740,8 @@ func (a *Actor) settleSeat(seat int) {
 	delete(a.identities, player.UserID)
 	delete(a.joinOrder, player.UserID)
 	delete(a.muted, player.UserID)
+	delete(a.connections, player.UserID)
+	delete(a.disconnectGen, player.UserID)
 	if a.onSeatClosed != nil {
 		a.onSeatClosed(player.UserID)
 	}
