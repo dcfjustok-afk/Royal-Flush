@@ -294,6 +294,31 @@ test("玩家可以从等候室主动离开且快速点击只提交一次", async
   await expect(page.locator(".form-message.error")).toHaveCount(0);
 });
 
+test("复制权限被拒绝时不会谎报成功并提供手动方案", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1440", "代表性桌面项目覆盖剪贴板拒绝边界");
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: () => Promise.reject(new DOMException("denied", "NotAllowedError")) },
+    });
+  });
+  const waiting = structuredClone(playerSnapshot);
+  waiting.street = "waiting";
+  waiting.handNumber = 0;
+  waiting.players.forEach((player) => (player.isCurrentActor = false));
+  await page.route("**/api/v1/rooms/room-saturday/snapshot", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify(waiting),
+  }));
+
+  await page.goto("/rooms/room-saturday/waiting");
+  const copy = page.getByRole("button", { name: "复制邀请链接" });
+  await copy.click();
+  await expect(copy).toHaveText(/复制邀请链接/);
+  await expect(page.getByText("无法复制邀请链接，请手动选择下方链接复制")).toBeVisible();
+});
+
 test("跨房失败会保留原房间且重试成功后进入目标房间", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1440", "代表性桌面项目覆盖跨房失败与重试");
   const oldRoom = structuredClone(playerSnapshot);

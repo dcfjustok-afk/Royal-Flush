@@ -30,9 +30,15 @@ watch(() => [store.snapshot.roomId, store.snapshot.street] as const, ([roomId, s
 });
 
 async function copyInvite() {
-  await navigator.clipboard.writeText(inviteUrl.value).catch(() => undefined);
-  copied.value = true;
-  window.setTimeout(() => (copied.value = false), 1800);
+	actionError.value = "";
+	try {
+		await navigator.clipboard.writeText(inviteUrl.value);
+		copied.value = true;
+		window.setTimeout(() => (copied.value = false), 1800);
+	} catch {
+		copied.value = false;
+		actionError.value = "无法复制邀请链接，请手动选择下方链接复制";
+	}
 }
 
 async function toggleReady() {

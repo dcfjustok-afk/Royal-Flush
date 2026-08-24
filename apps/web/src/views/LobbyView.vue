@@ -11,6 +11,7 @@ const store = useGameStore();
 const router = useRouter();
 const roomCode = ref("");
 const joinError = ref("");
+const copyFeedback = ref("");
 
 function joinRoom() {
   const code = roomCode.value.trim().toUpperCase();
@@ -23,7 +24,15 @@ function joinRoom() {
 }
 
 async function copyCode() {
-  if (store.snapshot.roomCode) await navigator.clipboard.writeText(store.snapshot.roomCode).catch(() => undefined);
+	if (!store.snapshot.roomCode) return;
+	copyFeedback.value = "";
+	try {
+		await navigator.clipboard.writeText(store.snapshot.roomCode);
+		copyFeedback.value = "房间码已复制";
+		window.setTimeout(() => (copyFeedback.value = ""), 1800);
+	} catch {
+		copyFeedback.value = "复制失败，请手动记录房间码";
+	}
 }
 
 const hasActiveRoom = computed(() => Boolean(store.activeRoomId && store.snapshot.roomId === store.activeRoomId && store.localPlayer));
@@ -51,7 +60,7 @@ onMounted(async () => {
           <div class="room-signal"><VoiceMeter active /><span>{{ activeRoomStatus }}</span></div>
           <div class="active-room-name"><strong>{{ store.snapshot.roomName }}</strong><span>{{ store.snapshot.roomCode }} · 第 {{ store.snapshot.handNumber }} 手牌</span></div>
           <dl class="room-facts"><div><dt>在线</dt><dd><Users />{{ store.activePlayers }} / {{ store.roomConfig.maxPlayers }}</dd></div><div><dt>盲注</dt><dd>{{ store.roomConfig.blindPreset }}</dd></div><div><dt>桌内语音</dt><dd><Headphones />{{ store.roomConfig.voiceEnabled ? "已开启" : "未开启" }}</dd></div></dl>
-          <div class="room-band-actions"><button class="icon-button" type="button" title="复制房间码" aria-label="复制房间码" @click="copyCode"><Copy /></button><RouterLink class="button light" :to="activeRoomRoute">{{ activeRoomAction }}<ArrowRight /></RouterLink></div>
+          <div class="room-band-actions"><span v-if="copyFeedback" role="status">{{ copyFeedback }}</span><button class="icon-button" type="button" title="复制房间码" aria-label="复制房间码" @click="copyCode"><Copy /></button><RouterLink class="button light" :to="activeRoomRoute">{{ activeRoomAction }}<ArrowRight /></RouterLink></div>
         </div>
         <div v-else class="active-room-band"><div class="active-room-name"><strong>当前没有进行中的牌局</strong><span>创建房间或使用好友发来的房间码加入</span></div></div>
       </section>
