@@ -9,7 +9,8 @@ COPY apps/web/package.json apps/web/tsconfig.json apps/web/vite.config.ts apps/w
 COPY apps/web/src ./apps/web/src
 RUN npm ci
 ENV VITE_USE_API=true
-RUN npm run build -w @royal-flush/web
+RUN npm run build -w @royal-flush/contracts \
+  && npm run build -w @royal-flush/web
 
 FROM nginx:1.27-alpine
 ENV PORT=8080 \
