@@ -88,3 +88,19 @@ func TestConcurrentAdditionIdempotency(t *testing.T) {
 		t.Fatalf("balance = %d", balance)
 	}
 }
+
+func TestResetRequestIsIdempotent(t *testing.T) {
+	service := NewService(nil)
+	service.EnsureUser("u1")
+	first, duplicate, err := service.ResetAllWithRequest("admin", "赛季重置", "reset-1")
+	if err != nil || duplicate {
+		t.Fatalf("first reset failed: %#v %v %v", first, duplicate, err)
+	}
+	retry, duplicate, err := service.ResetAllWithRequest("admin", "被篡改的原因", "reset-1")
+	if err != nil || !duplicate || retry != first {
+		t.Fatalf("reset retry was not idempotent: %#v %v %v", retry, duplicate, err)
+	}
+	if len(service.Epochs()) != 2 {
+		t.Fatalf("duplicate reset created an extra epoch: %#v", service.Epochs())
+	}
+}

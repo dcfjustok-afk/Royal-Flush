@@ -226,6 +226,16 @@ func (a *Actor) Snapshot(ctx context.Context, userID string) (TableSnapshot, err
 	return value.(TableSnapshot), nil
 }
 
+func (a *Actor) PublicSnapshot(ctx context.Context) (TableSnapshot, error) {
+	value, err := a.call(ctx, func() (any, error) {
+		return a.snapshot(""), nil
+	})
+	if err != nil {
+		return TableSnapshot{}, err
+	}
+	return value.(TableSnapshot), nil
+}
+
 func (a *Actor) Handle(ctx context.Context, userID string, command ClientCommand) (Envelope, bool, error) {
 	value, err := a.call(ctx, func() (any, error) {
 		if a.ended {
@@ -292,6 +302,10 @@ func (a *Actor) Subscribe(ctx context.Context) (<-chan Envelope, func(), error) 
 
 func (a *Actor) BroadcastScoreAddition(ctx context.Context, userID, requestID string, amount, balance int64) error {
 	_, err := a.call(ctx, func() (any, error) {
+		key := "score-addition\x00" + userID + "\x00" + requestID
+		if _, ok := a.processed[key]; ok {
+			return nil, nil
+		}
 		identity := a.identities[userID]
 		if identity.ID == "" {
 			return nil, ErrPlayerNotSeated
@@ -299,7 +313,9 @@ func (a *Actor) BroadcastScoreAddition(ctx context.Context, userID, requestID st
 		text := fmt.Sprintf("%s 自行增加了 %d 积分，当前局外积分为 %d", identity.Name, amount, balance)
 		message := a.appendMessage("score", text)
 		a.version++
-		a.publish("score.self_added", requestID, map[string]any{"userId": userID, "amount": amount, "balance": balance, "message": message})
+		envelope := a.makeEnvelope("score.self_added", requestID, map[string]any{"userId": userID, "amount": amount, "balance": balance, "message": message})
+		a.processed[key] = envelope
+		a.publishEnvelope(envelope)
 		return nil, nil
 	})
 	return err

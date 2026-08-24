@@ -66,6 +66,7 @@ type Service struct {
 	entries           map[string][]LedgerEntry
 	additionResults   map[string]Result
 	settlementResults map[string]Result
+	resetResults      map[string]Epoch
 	lastAddition      map[string]time.Time
 }
 
@@ -85,6 +86,7 @@ func NewService(now func() time.Time) *Service {
 		entries:           make(map[string][]LedgerEntry),
 		additionResults:   make(map[string]Result),
 		settlementResults: make(map[string]Result),
+		resetResults:      make(map[string]Epoch),
 		lastAddition:      make(map[string]time.Time),
 	}
 }
@@ -149,6 +151,28 @@ func (s *Service) ApplySettlement(userID, roomID, seatSessionID string, net int6
 func (s *Service) ResetAll(administrator, reason string) (Epoch, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.resetAllLocked(administrator, reason)
+}
+
+func (s *Service) ResetAllWithRequest(administrator, reason, requestID string) (Epoch, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if requestID == "" {
+		return Epoch{}, false, ErrRequestID
+	}
+	key := administrator + "\x00" + requestID
+	if epoch, ok := s.resetResults[key]; ok {
+		return epoch, true, nil
+	}
+	epoch, err := s.resetAllLocked(administrator, reason)
+	if err != nil {
+		return Epoch{}, false, err
+	}
+	s.resetResults[key] = epoch
+	return epoch, false, nil
+}
+
+func (s *Service) resetAllLocked(administrator, reason string) (Epoch, error) {
 	if administrator == "" {
 		return Epoch{}, errors.New("administrator is required")
 	}
