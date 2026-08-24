@@ -130,6 +130,81 @@ test("准备已提交时快照短暂失败不会误报操作失败", async ({ pa
   await expect(page.locator(".form-message.error")).toHaveCount(0);
 });
 
+test("刷新陈旧房间地址会恢复到账号当前房间", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1440", "代表性桌面项目覆盖跨标签切房后的刷新恢复");
+  const target = structuredClone(playerSnapshot);
+  target.roomId = "room-target";
+  target.roomCode = "RF-TARG";
+  target.roomName = "目标等候室";
+  target.street = "waiting";
+  target.handNumber = 0;
+  target.board = [];
+  target.holeCards = [];
+  if (!target.config) throw new Error("player fixture is missing room config");
+  target.config.name = "目标等候室";
+  target.players = [
+    target.players.find((player) => player.id === "me")!,
+    target.players.find((player) => player.id === "p1")!,
+  ].map((player, seat) => ({
+    ...player,
+    seat,
+    isLocal: seat === 0,
+    isCurrentActor: false,
+    isReady: false,
+  }));
+  await page.route("**/api/v1/me", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      user: { id: "me", phone: "13800138000", nickname: "你", permissions: {}, banned: false, createdAt: "2026-08-24T12:00:00Z" },
+      balance: 1860,
+      activeRoomId: "room-target",
+    }),
+  }));
+  await page.route("**/api/v1/rooms/room-old/snapshot", (route) => route.fulfill({
+    status: 404,
+    contentType: "application/json",
+    body: JSON.stringify({ code: "player_not_seated", message: "你不在这个房间中" }),
+  }));
+  await page.route("**/api/v1/rooms/room-target/snapshot", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify(target),
+  }));
+
+  await page.goto("/rooms/room-old/waiting");
+  await expect(page).toHaveURL(/\/rooms\/room-target\/waiting$/);
+  await expect(page.getByRole("heading", { name: "目标等候室" })).toBeVisible();
+  await expect(page.locator(".form-message.error")).toHaveCount(0);
+});
+
+test("刷新当前等候室会保留权威准备状态", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1440", "代表性桌面项目覆盖同房刷新恢复");
+  const waiting = structuredClone(playerSnapshot);
+  waiting.street = "waiting";
+  waiting.handNumber = 0;
+  waiting.players = [
+    waiting.players.find((player) => player.id === "me")!,
+    waiting.players.find((player) => player.id === "p1")!,
+  ].map((player) => ({
+    ...player,
+    isCurrentActor: false,
+    isReady: true,
+  }));
+  await page.route("**/api/v1/rooms/room-saturday/snapshot", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify(waiting),
+  }));
+
+  await page.goto("/rooms/room-saturday/waiting");
+  await expect(page.getByRole("button", { name: /已准备/ })).toBeVisible();
+  await page.reload();
+  await expect(page).toHaveURL(/\/rooms\/room-saturday\/waiting$/);
+  await expect(page.getByRole("button", { name: /已准备/ })).toBeVisible();
+  await expect(page.locator(".form-message.error")).toHaveCount(0);
+});
+
 test("牌桌在目标视口内保持完整且筹码不会改变布局", async ({ page }) => {
   await page.goto("/rooms/room-saturday/table");
   await expect(page.locator(".table-app")).toBeVisible();

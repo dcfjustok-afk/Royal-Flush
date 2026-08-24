@@ -5,7 +5,7 @@ import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
 import AppHeader from "@/components/AppHeader.vue";
 import RoomManagementPanel from "@/components/RoomManagementPanel.vue";
 import VoiceMeter from "@/components/VoiceMeter.vue";
-import { apiMode } from "@/lib/api";
+import { ApiError, apiMode } from "@/lib/api";
 import { useGameStore } from "@/stores/game";
 
 const store = useGameStore();
@@ -51,6 +51,29 @@ async function startGame() {
   }
 }
 
+async function redirectAfterUnavailableRoom(reason: unknown) {
+  const recoverable = reason instanceof ApiError && (
+    reason.status === 401 ||
+    reason.status === 404 ||
+    reason.status === 410 ||
+    ["player_not_seated", "room_not_found", "room_closed"].includes(reason.code)
+  );
+  if (!recoverable) return false;
+
+  store.disconnectRoomEvents();
+  try {
+    await store.refreshAccount();
+  } catch {
+    return false;
+  }
+  if (!store.currentUser) {
+    await router.replace({ name: "account", query: { redirect: route.fullPath } });
+  } else {
+    await router.replace(store.activeRoomRoute());
+  }
+  return true;
+}
+
 onMounted(async () => {
   await store.probeBackend();
   if (!apiMode || !store.backendOnline) {
@@ -61,6 +84,7 @@ onMounted(async () => {
     const snapshot = await store.loadRoom(String(route.params.id));
     store.connectRoomEvents(snapshot.roomId);
   } catch (reason) {
+    if (await redirectAfterUnavailableRoom(reason)) return;
     actionError.value = reason instanceof Error ? reason.message : "无法恢复房间状态";
   }
 });

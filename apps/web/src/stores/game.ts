@@ -263,6 +263,14 @@ export const useGameStore = defineStore("game", () => {
     for (const player of snapshot.value.players) player.isSpeaking = false;
   }
 
+  function activeRoomRoute() {
+    const roomId = activeRoomId.value;
+    if (!roomId || snapshot.value.roomId !== roomId || !localPlayer.value) return "/";
+    return snapshot.value.street === "waiting"
+      ? `/rooms/${roomId}/waiting`
+      : `/rooms/${roomId}/table`;
+  }
+
   async function addAccountPoints(amount: number) {
     if (!Number.isInteger(amount) || amount < 1 || amount > 1_000_000_000) {
       throw new Error("请输入 1 到 1,000,000,000 之间的正整数");
@@ -398,7 +406,7 @@ export const useGameStore = defineStore("game", () => {
   return {
     accountPoints, currentUser, activeRoomId, ledger, roomConfig, snapshot, messages, microphoneEnabled, voiceConnected, voiceTransport, voiceError, activeSpeakerId, microphones, selectedMicrophoneId, voiceBusy,
     backendOnline, connectionState, connectionError, roomLoading, commandPending,
-    localPlayer, activePlayers, probeBackend, refreshAccount, acceptSnapshot, createRoom, loadRoom, joinRoom, sendCommand, connectRoomEvents, disconnectRoomEvents,
+    localPlayer, activePlayers, probeBackend, refreshAccount, activeRoomRoute, acceptSnapshot, createRoom, loadRoom, joinRoom, sendCommand, connectRoomEvents, disconnectRoomEvents,
     addAccountPoints, updateRoomConfig, toggleMicrophone, refreshMicrophones, selectMicrophone, registerAccount, loginAccount, updateNickname, logoutAccount, raise, call, fold, allIn,
   };
 });

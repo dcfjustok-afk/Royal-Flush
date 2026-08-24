@@ -13,7 +13,7 @@ import RoomManagementPanel from "@/components/RoomManagementPanel.vue";
 import ScoreAddPanel from "@/components/ScoreAddPanel.vue";
 import SystemBroadcast from "@/components/SystemBroadcast.vue";
 import VoiceMeter from "@/components/VoiceMeter.vue";
-import { apiMode } from "@/lib/api";
+import { ApiError, apiMode } from "@/lib/api";
 import { useGameStore } from "@/stores/game";
 
 const store = useGameStore();
@@ -68,10 +68,13 @@ async function retryConnection() {
     tableError.value = "后端服务暂时不可用，请稍后重试";
     return;
   }
-  await store.loadRoom(String(route.params.id)).catch((reason) => {
+  try {
+    const snapshot = await store.loadRoom(String(route.params.id));
+    store.connectRoomEvents(snapshot.roomId);
+  } catch (reason) {
+    if (await redirectAfterUnavailableRoom(reason)) return;
     tableError.value = reason instanceof Error ? reason.message : "无法恢复牌桌";
-  });
-  store.connectRoomEvents(store.snapshot.roomId);
+  }
 }
 
 async function leaveTable() {
@@ -99,14 +102,40 @@ function selectMicrophone(event: Event) {
   void store.selectMicrophone((event.target as HTMLSelectElement).value);
 }
 
+async function redirectAfterUnavailableRoom(reason: unknown) {
+  const recoverable = reason instanceof ApiError && (
+    reason.status === 401 ||
+    reason.status === 404 ||
+    reason.status === 410 ||
+    ["player_not_seated", "room_not_found", "room_closed"].includes(reason.code)
+  );
+  if (!recoverable) return false;
+
+  store.disconnectRoomEvents();
+  try {
+    await store.refreshAccount();
+  } catch {
+    return false;
+  }
+  if (!store.currentUser) {
+    await router.replace({ name: "account", query: { redirect: route.fullPath } });
+  } else {
+    await router.replace(store.activeRoomRoute());
+  }
+  return true;
+}
+
 onMounted(async () => {
   timer = window.setInterval(() => (now.value = Date.now()), 250);
   await store.probeBackend();
   if (store.backendOnline) {
-    await store.loadRoom(String(route.params.id)).catch((reason) => {
+    try {
+      const snapshot = await store.loadRoom(String(route.params.id));
+      store.connectRoomEvents(snapshot.roomId);
+    } catch (reason) {
+      if (await redirectAfterUnavailableRoom(reason)) return;
       tableError.value = reason instanceof Error ? reason.message : "无法读取牌桌";
-    });
-    store.connectRoomEvents(store.snapshot.roomId);
+    }
   }
 });
 onBeforeUnmount(() => {
