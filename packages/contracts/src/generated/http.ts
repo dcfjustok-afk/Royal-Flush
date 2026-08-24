@@ -633,6 +633,7 @@ export interface operations {
                         onlinePlayers: number;
                         maxPlayers: number;
                         config: components["schemas"]["RoomConfig"];
+                        occupiedSeats: number[];
                     };
                 };
             };

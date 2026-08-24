@@ -20,12 +20,12 @@ func RoomCode() (string, error) {
 	}
 	const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 	n := binary.LittleEndian.Uint64(raw[:])
-	code := make([]byte, 6)
+	code := make([]byte, 4)
 	for i := range code {
 		code[i] = alphabet[n%uint64(len(alphabet))]
 		n /= uint64(len(alphabet))
 	}
-	return string(code), nil
+	return "RF-" + string(code), nil
 }
 
 func hex(raw []byte) string {

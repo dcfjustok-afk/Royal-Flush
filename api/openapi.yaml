@@ -156,7 +156,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [id, code, name, ownerId, onlinePlayers, maxPlayers, config]
+                required: [id, code, name, ownerId, onlinePlayers, maxPlayers, config, occupiedSeats]
                 properties:
                   id: { type: string }
                   code: { type: string }
@@ -165,6 +165,9 @@ paths:
                   onlinePlayers: { type: integer }
                   maxPlayers: { type: integer }
                   config: { $ref: '#/components/schemas/RoomConfig' }
+                  occupiedSeats:
+                    type: array
+                    items: { type: integer, minimum: 0, maximum: 7 }
   /rooms/{roomID}/join:
     parameters:
       - $ref: '#/components/parameters/RoomID'
@@ -452,4 +455,3 @@ components:
         createdAt: { type: string, format: date-time }
 security:
   - sessionCookie: []
-
