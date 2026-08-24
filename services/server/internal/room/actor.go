@@ -109,6 +109,13 @@ type commandResult struct {
 	Duplicate bool
 }
 
+type settlementNotice struct {
+	userID        string
+	seatSessionID string
+	net           int64
+	balance       int64
+}
+
 type actorCall struct {
 	fn       func() (any, error)
 	response chan actorResponse
@@ -426,6 +433,11 @@ func (a *Actor) Handle(ctx context.Context, userID string, command ClientCommand
 		if err != nil {
 			return nil, err
 		}
+		settlements, err := a.settlementsForStableState()
+		if err != nil {
+			a.restorePersistentState(checkpoint)
+			return nil, err
+		}
 		a.version++
 		if a.game.InHand() && a.game.Actor >= 0 && a.game.Version != gameVersion {
 			a.scheduleActionTimeout()
@@ -439,9 +451,8 @@ func (a *Actor) Handle(ctx context.Context, userID string, command ClientCommand
 			}
 		}
 		a.publishEnvelope(envelope)
-		if !a.game.InHand() {
-			a.settleLeaving()
-		}
+		a.finishSettlements(settlements)
+		a.finishRoomMetadata(checkpoint.Room.OwnerID, eventType)
 		return commandResult{Envelope: envelope}, nil
 	})
 	if err != nil {
@@ -755,17 +766,11 @@ func (a *Actor) applyCommand(userID string, seat int, command ClientCommand) (an
 		if a.game.InHand() {
 			return nil, "", poker.ErrHandInProgress
 		}
-		if a.onRoomEnded != nil {
-			if err := a.onRoomEnded(); err != nil {
-				return nil, "", err
-			}
-		}
 		userIDs := make([]string, 0, len(a.identities))
 		for userID := range a.identities {
 			userIDs = append(userIDs, userID)
 		}
 		a.ended = true
-		a.settleAll()
 		return map[string]any{"ended": true, "userIds": userIDs}, "room.ended", nil
 	default:
 		return nil, "", fmt.Errorf("unsupported command %q", command.Type)
@@ -904,16 +909,29 @@ func (a *Actor) handleTimeout(signal timeoutSignal) {
 	if a.ended || !a.game.InHand() || signal.generation != a.actionGen || signal.seat != a.game.Actor {
 		return
 	}
+	checkpoint := a.persistentState()
 	toCall := a.game.ToCall(signal.seat)
 	if err := a.game.Timeout(signal.seat); err != nil {
 		return
 	}
+	settlements, err := a.settlementsForStableState()
+	if err != nil {
+		a.restorePersistentState(checkpoint)
+		return
+	}
 	a.version++
-	a.publish("game.action_timed_out", "", map[string]any{"seat": signal.seat, "action": map[bool]string{true: "check", false: "fold"}[toCall == 0]})
+	envelope := a.makeEnvelope("game.action_timed_out", "", map[string]any{"seat": signal.seat, "action": map[bool]string{true: "check", false: "fold"}[toCall == 0]})
+	if a.onEvent != nil {
+		if err := a.onEvent("", envelope, a.persistentState()); err != nil {
+			a.restorePersistentState(checkpoint)
+			return
+		}
+	}
+	a.publishEnvelope(envelope)
+	a.finishSettlements(settlements)
+	a.finishRoomMetadata(checkpoint.Room.OwnerID, "game.action_timed_out")
 	if a.game.InHand() && a.game.Actor >= 0 {
 		a.scheduleActionTimeout()
-	} else {
-		a.settleLeaving()
 	}
 }
 
@@ -925,16 +943,30 @@ func (a *Actor) handleDisconnectTimeout(signal disconnectSignal) {
 	if seat < 0 || !a.game.Seats[seat].Disconnected {
 		return
 	}
+	checkpoint := a.persistentState()
 	if err := a.game.Withdraw(seat); err != nil {
 		return
 	}
+	settlements, err := a.settlementsForStableState()
+	if err != nil {
+		a.restorePersistentState(checkpoint)
+		a.scheduleDisconnectTimeout(signal.userID)
+		return
+	}
 	a.version++
-	a.publish("room.player_leaving", "", map[string]any{"userId": signal.userID, "reason": "disconnect_timeout"})
+	envelope := a.makeEnvelope("room.player_leaving", "", map[string]any{"userId": signal.userID, "reason": "disconnect_timeout"})
+	if a.onEvent != nil {
+		if err := a.onEvent("", envelope, a.persistentState()); err != nil {
+			a.restorePersistentState(checkpoint)
+			a.scheduleDisconnectTimeout(signal.userID)
+			return
+		}
+	}
+	a.publishEnvelope(envelope)
+	a.finishSettlements(settlements)
+	a.finishRoomMetadata(checkpoint.Room.OwnerID, "room.player_leaving")
 	if a.game.InHand() && a.game.Actor >= 0 {
 		a.scheduleActionTimeout()
-	}
-	if !a.game.InHand() {
-		a.settleLeaving()
 	}
 }
 
@@ -947,42 +979,89 @@ func (a *Actor) seatFor(userID string) int {
 	return -1
 }
 
-func (a *Actor) settleLeaving() {
+func (a *Actor) settlementsForStableState() ([]settlementNotice, error) {
+	if a.ended {
+		return a.settleAll()
+	}
+	if !a.game.InHand() {
+		return a.settleLeaving()
+	}
+	return nil, nil
+}
+
+func (a *Actor) settleLeaving() ([]settlementNotice, error) {
+	settlements := make([]settlementNotice, 0)
 	for seat, player := range a.game.Seats {
 		if player != nil && player.Leaving {
-			a.settleSeat(seat)
+			settlement, err := a.settleSeat(seat)
+			if err != nil {
+				return nil, err
+			}
+			settlements = append(settlements, settlement)
 		}
 	}
+	return settlements, nil
 }
 
-func (a *Actor) settleAll() {
+func (a *Actor) settleAll() ([]settlementNotice, error) {
+	settlements := make([]settlementNotice, 0)
 	for seat, player := range a.game.Seats {
 		if player != nil {
-			a.settleSeat(seat)
+			settlement, err := a.settleSeat(seat)
+			if err != nil {
+				return nil, err
+			}
+			settlements = append(settlements, settlement)
 		}
 	}
+	return settlements, nil
 }
 
-func (a *Actor) settleSeat(seat int) {
-	player, err := a.game.RemoveSeat(seat)
-	if err != nil {
-		return
+func (a *Actor) settleSeat(seat int) (settlementNotice, error) {
+	player := a.game.Seats[seat]
+	if player == nil {
+		return settlementNotice{}, poker.ErrIllegalAction
 	}
 	net := player.Stack - player.Allocated
 	result, err := a.scores.ApplySettlement(player.UserID, a.ID, player.SeatSessionID, net)
-	if err == nil {
-		a.publish("score.settlement_applied", player.SeatSessionID, map[string]any{"userId": player.UserID, "net": net, "balance": result.Balance})
+	if err != nil {
+		return settlementNotice{}, err
+	}
+	player, err = a.game.RemoveSeat(seat)
+	if err != nil {
+		return settlementNotice{}, err
 	}
 	delete(a.identities, player.UserID)
 	delete(a.joinOrder, player.UserID)
 	delete(a.muted, player.UserID)
-	delete(a.connections, player.UserID)
-	delete(a.disconnectGen, player.UserID)
-	if a.onSeatClosed != nil {
-		a.onSeatClosed(player.UserID)
-	}
 	if player.UserID == a.OwnerID {
 		a.transferOwnerAfterDeparture()
+	}
+	return settlementNotice{userID: player.UserID, seatSessionID: player.SeatSessionID, net: net, balance: result.Balance}, nil
+}
+
+func (a *Actor) finishSettlements(settlements []settlementNotice) {
+	for _, settlement := range settlements {
+		delete(a.connections, settlement.userID)
+		delete(a.disconnectGen, settlement.userID)
+		if a.onSeatClosed != nil {
+			a.onSeatClosed(settlement.userID)
+		}
+		a.publishEnvelope(a.makeEnvelope("score.settlement_applied", settlement.seatSessionID, map[string]any{
+			"userId": settlement.userID, "net": settlement.net, "balance": settlement.balance,
+		}))
+	}
+}
+
+func (a *Actor) finishRoomMetadata(previousOwnerID, eventType string) {
+	if a.OwnerID != previousOwnerID && a.onOwnerChanged != nil {
+		_ = a.onOwnerChanged(a.OwnerID)
+	}
+	if a.OwnerID != "" && a.OwnerID != previousOwnerID && eventType != "room.owner_transferred" {
+		a.publishEnvelope(a.makeEnvelope("room.owner_transferred", "", map[string]any{"userId": a.OwnerID, "automatic": true}))
+	}
+	if a.ended && a.onRoomEnded != nil {
+		_ = a.onRoomEnded()
 	}
 }
 
@@ -1000,15 +1079,8 @@ func (a *Actor) transferOwnerAfterDeparture() {
 		}
 	}
 	if candidate != nil {
-		if a.onOwnerChanged != nil {
-			_ = a.onOwnerChanged(candidate.UserID)
-		}
 		a.OwnerID = candidate.UserID
-		a.publish("room.owner_transferred", "", map[string]any{"userId": candidate.UserID, "automatic": true})
 		return
-	}
-	if a.onOwnerChanged != nil {
-		_ = a.onOwnerChanged("")
 	}
 	a.OwnerID = ""
 }

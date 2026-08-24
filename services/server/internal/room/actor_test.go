@@ -495,6 +495,33 @@ func TestJoinPersistenceFailureRestoresActorState(t *testing.T) {
 	}
 }
 
+type flakySettlementScores struct {
+	failUser     string
+	failuresLeft int
+	applied      map[string]score.Result
+}
+
+func newFlakySettlementScores(failUser string, failures int) *flakySettlementScores {
+	return &flakySettlementScores{failUser: failUser, failuresLeft: failures, applied: make(map[string]score.Result)}
+}
+
+func (s *flakySettlementScores) Balance(string) int64 { return 1000 }
+
+func (s *flakySettlementScores) ApplySettlement(userID, _ string, seatSessionID string, _ int64) (score.Result, error) {
+	if result, ok := s.applied[seatSessionID]; ok {
+		return result, nil
+	}
+	if userID == s.failUser && s.failuresLeft > 0 {
+		s.failuresLeft--
+		return score.Result{}, errors.New("settlement storage unavailable")
+	}
+	result := score.Result{Balance: 1000}
+	s.applied[seatSessionID] = result
+	return result, nil
+}
+
+func (s *flakySettlementScores) applicationCount() int { return len(s.applied) }
+
 type recordingLease struct {
 	mu       sync.Mutex
 	acquire  bool
@@ -738,6 +765,115 @@ func TestCommandPersistenceFailureRestoresActorState(t *testing.T) {
 	afterRetry, err := actor.Snapshot(ctx, "owner")
 	if err != nil || afterRetry.Version != before.Version+1 || !localPlayer(afterRetry).IsReady {
 		t.Fatalf("retry did not apply exactly once: snapshot=%#v err=%v", afterRetry, err)
+	}
+}
+
+func TestSettlementFailureKeepsSeatAndAllowsSameRequestRetry(t *testing.T) {
+	ctx := context.Background()
+	scores := newFlakySettlementScores("u2", 1)
+	manager := NewManager(scores)
+	actor, err := manager.Create(ctx, testConfig(), Identity{ID: "owner", Name: "房主"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(manager.Close)
+	if _, err := manager.Join(ctx, actor.ID, Identity{ID: "u2", Name: "玩家二"}, 2); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := actor.Handle(ctx, "u2", ClientCommand{Type: "room.leave", RequestID: "leave-retry"}); err == nil {
+		t.Fatal("leave succeeded while settlement storage was unavailable")
+	}
+	snapshot, err := actor.Snapshot(ctx, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Players) != 2 || playerStatus(snapshot, "u2") != "active" || manager.ActiveRoom("u2") != actor.ID {
+		t.Fatalf("failed settlement removed the active seat: players=%#v active=%q", snapshot.Players, manager.ActiveRoom("u2"))
+	}
+
+	if _, duplicate, err := actor.Handle(ctx, "u2", ClientCommand{Type: "room.leave", RequestID: "leave-retry"}); err != nil || duplicate {
+		t.Fatalf("same request retry failed: duplicate=%v err=%v", duplicate, err)
+	}
+	snapshot, err = actor.Snapshot(ctx, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Players) != 1 || playerStatus(snapshot, "u2") != "" || manager.ActiveRoom("u2") != "" {
+		t.Fatalf("successful settlement retained the seat: players=%#v active=%q", snapshot.Players, manager.ActiveRoom("u2"))
+	}
+	if scores.applicationCount() != 1 {
+		t.Fatalf("settlement applied %d times, want exactly once", scores.applicationCount())
+	}
+}
+
+func TestRoomEndRetriesPartialSettlementsExactlyOnce(t *testing.T) {
+	ctx := context.Background()
+	scores := newFlakySettlementScores("u2", 1)
+	manager := NewManager(scores)
+	actor, err := manager.Create(ctx, testConfig(), Identity{ID: "owner", Name: "房主"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(manager.Close)
+	if _, err := manager.Join(ctx, actor.ID, Identity{ID: "u2", Name: "玩家二"}, 2); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := actor.Handle(ctx, "owner", ClientCommand{Type: "room.end", RequestID: "end-retry"}); err == nil {
+		t.Fatal("room end succeeded after a partial settlement failure")
+	}
+	snapshot, err := actor.Snapshot(ctx, "owner")
+	if err != nil || snapshot.Ended || len(snapshot.Players) != 2 {
+		t.Fatalf("failed room end leaked actor changes: snapshot=%#v err=%v", snapshot, err)
+	}
+	if manager.ActiveRoom("owner") != actor.ID || manager.ActiveRoom("u2") != actor.ID {
+		t.Fatal("partial settlement released active membership before room state committed")
+	}
+
+	if _, duplicate, err := actor.Handle(ctx, "owner", ClientCommand{Type: "room.end", RequestID: "end-retry"}); err != nil || duplicate {
+		t.Fatalf("room end retry failed: duplicate=%v err=%v", duplicate, err)
+	}
+	public, err := actor.PublicSnapshot(ctx)
+	if err != nil || !public.Ended || len(public.Players) != 0 {
+		t.Fatalf("room end retry did not finish: snapshot=%#v err=%v", public, err)
+	}
+	if scores.applicationCount() != 2 {
+		t.Fatalf("settlements applied %d times for two seats", scores.applicationCount())
+	}
+}
+
+func TestSettledDepartureDoesNotReappearAfterRestart(t *testing.T) {
+	ctx := context.Background()
+	store := &statefulRoomStore{states: make(map[string]PersistentState)}
+	manager := NewManagerWithStore(score.NewService(nil), store)
+	actor, err := manager.Create(ctx, testConfig(), Identity{ID: "owner", Name: "房主"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Join(ctx, actor.ID, Identity{ID: "u2", Name: "离桌玩家"}, 2); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := actor.Handle(ctx, "u2", ClientCommand{Type: "room.leave", RequestID: "leave-before-restart"}); err != nil {
+		t.Fatal(err)
+	}
+	manager.Close()
+
+	restoredManager := NewManagerWithStore(score.NewService(nil), store)
+	t.Cleanup(restoredManager.Close)
+	if err := restoredManager.Restore(ctx); err != nil {
+		t.Fatal(err)
+	}
+	restoredActor, ok := restoredManager.Room(actor.ID)
+	if !ok {
+		t.Fatal("active room disappeared after restart")
+	}
+	if restoredManager.ActiveRoom("u2") != "" {
+		t.Fatal("departed player regained an active room after restart")
+	}
+	snapshot, err := restoredActor.Snapshot(ctx, "owner")
+	if err != nil || len(snapshot.Players) != 1 || playerStatus(snapshot, "u2") != "" {
+		t.Fatalf("departed seat reappeared after restart: players=%#v err=%v", snapshot.Players, err)
 	}
 }
 

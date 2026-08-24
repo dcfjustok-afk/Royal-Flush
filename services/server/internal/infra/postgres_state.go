@@ -166,9 +166,11 @@ func saveRoomStateTx(ctx context.Context, tx pgx.Tx, state room.PersistentState,
 	}
 	status := roomStateStatus(state)
 	if _, err := tx.Exec(ctx, `
-		UPDATE rooms SET version = $2, status = $3,
+		UPDATE rooms SET version = $2, status = $3, code = $4,
+			owner_id = CASE WHEN $5 = '' THEN owner_id ELSE $5 END,
+			empty_since = CASE WHEN $3 = 'empty' THEN COALESCE(empty_since, now()) ELSE NULL END,
 			ended_at = CASE WHEN $3 = 'ended' THEN COALESCE(ended_at, now()) ELSE ended_at END
-		WHERE id = $1`, state.Room.ID, state.Room.Version, status); err != nil {
+		WHERE id = $1`, state.Room.ID, state.Room.Version, status, state.Room.Code, state.Room.OwnerID); err != nil {
 		return fmt.Errorf("update room state metadata: %w", err)
 	}
 	return nil
@@ -177,6 +179,9 @@ func saveRoomStateTx(ctx context.Context, tx pgx.Tx, state room.PersistentState,
 func roomStateStatus(state room.PersistentState) string {
 	if state.Ended {
 		return "ended"
+	}
+	if state.Room.OwnerID == "" || len(state.Identities) == 0 {
+		return "empty"
 	}
 	switch state.Game.Street {
 	case poker.StreetPreflop, poker.StreetFlop, poker.StreetTurn, poker.StreetRiver, poker.StreetShowdown:
