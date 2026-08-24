@@ -1,0 +1,126 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go tests and vet
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: services/server/go.mod
+          cache-dependency-path: services/server/go.sum
+      - name: Test
+        run: go test ./...
+      - name: Race detector
+        run: go test -race ./...
+      - name: Vet
+        run: go vet ./...
+
+  node:
+    name: Node tests, contracts, and builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: services/server/go.mod
+          cache-dependency-path: services/server/go.sum
+      - name: Install dependencies
+        run: npm ci
+      - name: Unit tests
+        run: npm test
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
+      - name: Check generated contracts
+        run: npm run contracts:check
+
+  playwright:
+    name: Playwright browser flows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run end-to-end tests
+        run: npm run test:e2e
+
+  capacity-smoke:
+    name: Realtime capacity smoke
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: services/server/go.mod
+          cache-dependency-path: services/server/go.sum
+      - name: Start in-memory server
+        env:
+          ENVIRONMENT: development
+          PORT: 8080
+        run: |
+          go build -o "$RUNNER_TEMP/royal-flush-server" ./cmd/server
+          "$RUNNER_TEMP/royal-flush-server" > "$RUNNER_TEMP/server.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/server.pid"
+          for attempt in {1..50}; do
+            if curl --fail --silent http://127.0.0.1:8080/api/v1/ready > /dev/null; then
+              exit 0
+            fi
+            sleep 0.2
+          done
+          cat "$RUNNER_TEMP/server.log"
+          exit 1
+      - name: Run capacity smoke
+        run: |
+          go run ./cmd/loadtest \
+            -target http://127.0.0.1:8080 \
+            -connections 16 \
+            -rooms 4 \
+            -actions 4 \
+            -reconnects 4 \
+            -output "$RUNNER_TEMP/capacity-report.json"
+      - name: Show server log on failure
+        if: failure()
+        run: cat "$RUNNER_TEMP/server.log"
+      - name: Upload capacity report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capacity-smoke-report
+          path: ${{ runner.temp }}/capacity-report.json
+          if-no-files-found: warn
+      - name: Stop server
+        if: always()
+        run: |
+          if test -f "$RUNNER_TEMP/server.pid"; then
+            kill "$(cat "$RUNNER_TEMP/server.pid")" || true
+          fi
