@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ArrowLeft, Clock3, Copy, History, Mic, MicOff, PanelRightClose, Radio, Settings, Signal, Users, Wifi } from "@lucide/vue";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { useRoute } from "vue-router";
 import BrandMark from "@/components/BrandMark.vue";
 import ChipComposer from "@/components/ChipComposer.vue";
 import PlayerSeat from "@/components/PlayerSeat.vue";
@@ -11,6 +12,7 @@ import VoiceMeter from "@/components/VoiceMeter.vue";
 import { useGameStore } from "@/stores/game";
 
 const store = useGameStore();
+const route = useRoute();
 const sidePanel = ref<"history" | "settings" | null>(null);
 const now = ref(Date.now());
 let timer = 0;
@@ -28,10 +30,18 @@ async function copyRoomCode() {
   await navigator.clipboard.writeText(store.snapshot.roomCode).catch(() => undefined);
 }
 
-onMounted(() => {
+onMounted(async () => {
   timer = window.setInterval(() => (now.value = Date.now()), 250);
+  await store.probeBackend();
+  if (store.backendOnline) {
+    await store.loadRoom(String(route.params.id)).catch(() => undefined);
+    store.connectRoomEvents(store.snapshot.roomId);
+  }
 });
-onBeforeUnmount(() => window.clearInterval(timer));
+onBeforeUnmount(() => {
+  window.clearInterval(timer);
+  store.disconnectRoomEvents();
+});
 </script>
 
 <template>
@@ -77,10 +87,9 @@ onBeforeUnmount(() => window.clearInterval(timer));
         <template v-else>
           <ScoreAddPanel />
           <section class="side-rules"><header><h3>房间规则</h3><Users /></header><dl><div><dt>人数</dt><dd>{{ store.roomConfig.maxPlayers }} 人</dd></div><div><dt>盲注</dt><dd>{{ store.roomConfig.blindPreset }}</dd></div><div><dt>行动时间</dt><dd>{{ store.roomConfig.actionSeconds }} 秒</dd></div><div><dt>筹码</dt><dd>{{ store.snapshot.allowedChipDenominations.join(" / ") }}</dd></div></dl></section>
-          <section class="side-voice"><header><h3>麦克风</h3><Mic /></header><button class="toggle-row" type="button" @click="store.toggleMicrophone"><span><strong>{{ store.microphoneEnabled ? "已开启" : "已关闭" }}</strong><small>语音不录制、不保存、不转写</small></span><span class="switch" :class="{ checked: store.microphoneEnabled }" /></button></section>
+          <section class="side-voice"><header><h3>麦克风</h3><Mic /></header><button class="toggle-row" type="button" @click="store.toggleMicrophone"><span><strong>{{ store.microphoneEnabled ? "已开启" : "已关闭" }}</strong><small>{{ store.voiceError || "语音不录制、不保存、不转写" }}</small></span><span class="switch" :class="{ checked: store.microphoneEnabled }" /></button></section>
         </template>
       </aside>
     </Transition>
   </main>
 </template>
-

@@ -156,12 +156,13 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [id, code, name, ownerId, onlinePlayers, maxPlayers, config, occupiedSeats]
+                required: [id, code, name, ownerId, ownerName, onlinePlayers, maxPlayers, config, occupiedSeats]
                 properties:
                   id: { type: string }
                   code: { type: string }
                   name: { type: string }
                   ownerId: { type: string }
+                  ownerName: { type: string }
                   onlinePlayers: { type: integer }
                   maxPlayers: { type: integer }
                   config: { $ref: '#/components/schemas/RoomConfig' }

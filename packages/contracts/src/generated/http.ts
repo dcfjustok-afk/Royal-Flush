@@ -630,6 +630,7 @@ export interface operations {
                         code: string;
                         name: string;
                         ownerId: string;
+                        ownerName: string;
                         onlinePlayers: number;
                         maxPlayers: number;
                         config: components["schemas"]["RoomConfig"];

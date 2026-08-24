@@ -132,9 +132,18 @@ func (s *Server) publicRoom(writer http.ResponseWriter, request *http.Request) {
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"id": snapshot.RoomID, "code": snapshot.RoomCode, "name": snapshot.RoomName,
-		"ownerId": snapshot.OwnerID, "onlinePlayers": len(snapshot.Players), "maxPlayers": snapshot.Config.MaxPlayers,
+		"ownerId": snapshot.OwnerID, "ownerName": ownerName(snapshot), "onlinePlayers": len(snapshot.Players), "maxPlayers": snapshot.Config.MaxPlayers,
 		"config": snapshot.Config, "occupiedSeats": occupiedSeats(snapshot.Players),
 	})
+}
+
+func ownerName(snapshot room.TableSnapshot) string {
+	for _, player := range snapshot.Players {
+		if player.ID == snapshot.OwnerID {
+			return player.Name
+		}
+	}
+	return ""
 }
 
 func occupiedSeats(players []room.PlayerSnapshot) []int {

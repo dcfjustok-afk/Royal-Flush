@@ -1,11 +1,17 @@
 <script setup lang="ts">
 import { ArrowLeft, ArrowUpRight, CalendarDays, Radio, RotateCcw } from "@lucide/vue";
+import { onMounted } from "vue";
 import AppHeader from "@/components/AppHeader.vue";
 import ScoreAddPanel from "@/components/ScoreAddPanel.vue";
 import { useGameStore } from "@/stores/game";
 
 const store = useGameStore();
 const typeLabels = { initial_base: "初始积分", self_add: "自行增加", game_settlement: "牌局结算", admin_reset: "全站重置" } as const;
+
+onMounted(async () => {
+  await store.probeBackend();
+  await store.refreshAccount().catch(() => undefined);
+});
 </script>
 
 <template>
@@ -21,4 +27,3 @@ const typeLabels = { initial_base: "初始积分", self_add: "自行增加", gam
     </main>
   </div>
 </template>
-

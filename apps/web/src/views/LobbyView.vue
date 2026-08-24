@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ArrowRight, Clock3, Copy, Headphones, Plus, Radio, Users } from "@lucide/vue";
-import { ref } from "vue";
+import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import AppHeader from "@/components/AppHeader.vue";
 import ScoreAddPanel from "@/components/ScoreAddPanel.vue";
@@ -25,6 +25,11 @@ function joinRoom() {
 async function copyCode() {
   await navigator.clipboard.writeText("RF-2806").catch(() => undefined);
 }
+
+onMounted(async () => {
+  await store.probeBackend();
+  await store.refreshAccount().catch(() => undefined);
+});
 </script>
 
 <template>
@@ -69,4 +74,3 @@ async function copyCode() {
     </main>
   </div>
 </template>
-
