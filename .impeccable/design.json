@@ -1,0 +1,219 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-24T06:23:13.014Z",
+  "title": "Design System: Royal Flush",
+  "extensions": {
+    "colorMeta": {
+      "ground": {
+        "role": "neutral",
+        "displayName": "Warm Graphite",
+        "tonalRamp": ["oklch(15% 0.004 106.8)", "oklch(26% 0.004 106.8)", "oklch(38% 0.004 106.8)", "oklch(50% 0.004 106.8)", "oklch(62% 0.004 106.8)", "oklch(74% 0.004 106.8)", "oklch(86% 0.004 106.8)", "oklch(95% 0.004 106.8)"]
+      },
+      "ground-raised": {
+        "role": "neutral",
+        "displayName": "Raised Graphite",
+        "tonalRamp": ["oklch(15% 0.006 122)", "oklch(26% 0.006 122)", "oklch(38% 0.006 122)", "oklch(50% 0.006 122)", "oklch(62% 0.006 122)", "oklch(74% 0.006 122)", "oklch(86% 0.006 122)", "oklch(95% 0.006 122)"]
+      },
+      "panel": {
+        "role": "neutral",
+        "displayName": "Equipment Panel",
+        "tonalRamp": ["oklch(15% 0.006 121.9)", "oklch(26% 0.006 121.9)", "oklch(38% 0.006 121.9)", "oklch(50% 0.006 121.9)", "oklch(62% 0.006 121.9)", "oklch(74% 0.006 121.9)", "oklch(86% 0.006 121.9)", "oklch(95% 0.006 121.9)"]
+      },
+      "panel-raised": {
+        "role": "neutral",
+        "displayName": "Raised Equipment Panel",
+        "tonalRamp": ["oklch(15% 0.007 118.3)", "oklch(26% 0.007 118.3)", "oklch(38% 0.007 118.3)", "oklch(50% 0.007 118.3)", "oklch(62% 0.007 118.3)", "oklch(74% 0.007 118.3)", "oklch(86% 0.007 118.3)", "oklch(95% 0.007 118.3)"]
+      },
+      "table": {
+        "role": "neutral",
+        "displayName": "Table Surface",
+        "tonalRamp": ["oklch(15% 0.007 118.3)", "oklch(26% 0.007 118.3)", "oklch(38% 0.007 118.3)", "oklch(50% 0.007 118.3)", "oklch(62% 0.007 118.3)", "oklch(74% 0.007 118.3)", "oklch(86% 0.007 118.3)", "oklch(95% 0.007 118.3)"]
+      },
+      "bone": {
+        "role": "neutral",
+        "displayName": "Bone White",
+        "tonalRamp": ["oklch(15% 0.010 87.5)", "oklch(26% 0.010 87.5)", "oklch(38% 0.010 87.5)", "oklch(50% 0.010 87.5)", "oklch(62% 0.010 87.5)", "oklch(74% 0.010 87.5)", "oklch(86% 0.010 87.5)", "oklch(95% 0.010 87.5)"]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted Copy",
+        "tonalRamp": ["oklch(15% 0.013 96.5)", "oklch(26% 0.013 96.5)", "oklch(38% 0.013 96.5)", "oklch(50% 0.013 96.5)", "oklch(62% 0.013 96.5)", "oklch(74% 0.013 96.5)", "oklch(86% 0.013 96.5)", "oklch(95% 0.013 96.5)"]
+      },
+      "faint": {
+        "role": "neutral",
+        "displayName": "Faint Copy",
+        "tonalRamp": ["oklch(15% 0.012 118.2)", "oklch(26% 0.012 118.2)", "oklch(38% 0.012 118.2)", "oklch(50% 0.012 118.2)", "oklch(62% 0.012 118.2)", "oklch(74% 0.012 118.2)", "oklch(86% 0.012 118.2)", "oklch(95% 0.012 118.2)"]
+      },
+      "seam": {
+        "role": "neutral",
+        "displayName": "Equipment Seam",
+        "tonalRamp": ["oklch(15% 0.009 116)", "oklch(26% 0.009 116)", "oklch(38% 0.009 116)", "oklch(50% 0.009 116)", "oklch(62% 0.009 116)", "oklch(74% 0.009 116)", "oklch(86% 0.009 116)", "oklch(95% 0.009 116)"]
+      },
+      "seam-soft": {
+        "role": "neutral",
+        "displayName": "Soft Seam",
+        "tonalRamp": ["oklch(15% 0.007 118.3)", "oklch(26% 0.007 118.3)", "oklch(38% 0.007 118.3)", "oklch(50% 0.007 118.3)", "oklch(62% 0.007 118.3)", "oklch(74% 0.007 118.3)", "oklch(86% 0.007 118.3)", "oklch(95% 0.007 118.3)"]
+      },
+      "action": {
+        "role": "primary",
+        "displayName": "Action Vermilion",
+        "tonalRamp": ["oklch(15% 0.182 29.1)", "oklch(26% 0.182 29.1)", "oklch(38% 0.182 29.1)", "oklch(50% 0.182 29.1)", "oklch(62% 0.182 29.1)", "oklch(74% 0.182 29.1)", "oklch(86% 0.182 29.1)", "oklch(95% 0.182 29.1)"]
+      },
+      "voice": {
+        "role": "secondary",
+        "displayName": "Voice Mint",
+        "tonalRamp": ["oklch(15% 0.099 163.1)", "oklch(26% 0.099 163.1)", "oklch(38% 0.099 163.1)", "oklch(50% 0.099 163.1)", "oklch(62% 0.099 163.1)", "oklch(74% 0.099 163.1)", "oklch(86% 0.099 163.1)", "oklch(95% 0.099 163.1)"]
+      },
+      "waiting": {
+        "role": "tertiary",
+        "displayName": "Waiting Amber",
+        "tonalRamp": ["oklch(15% 0.128 83.4)", "oklch(26% 0.128 83.4)", "oklch(38% 0.128 83.4)", "oklch(50% 0.128 83.4)", "oklch(62% 0.128 83.4)", "oklch(74% 0.128 83.4)", "oklch(86% 0.128 83.4)", "oklch(95% 0.128 83.4)"]
+      },
+      "focus": {
+        "role": "secondary",
+        "displayName": "Focus Mint",
+        "tonalRamp": ["oklch(15% 0.053 165.8)", "oklch(26% 0.053 165.8)", "oklch(38% 0.053 165.8)", "oklch(50% 0.053 165.8)", "oklch(62% 0.053 165.8)", "oklch(74% 0.053 165.8)", "oklch(86% 0.053 165.8)", "oklch(95% 0.053 165.8)"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display Measurement", "purpose": "Singular account-score and epoch readouts." },
+      "headline": { "displayName": "Headline", "purpose": "Major page headings." },
+      "title": { "displayName": "Title", "purpose": "Section, panel, and dialog titles." },
+      "body": { "displayName": "Body", "purpose": "Operational explanation and recovery copy." },
+      "label": { "displayName": "Label", "purpose": "Metadata, fields, navigation, and state annotations." },
+      "measurement": { "displayName": "Measurement", "purpose": "Points, stakes, bets, hand numbers, countdowns, timestamps, and compact identifiers." }
+    },
+    "shadows": [
+      { "name": "card-lift", "value": "0 7px 14px rgba(0,0,0,.22)", "purpose": "Face-up playing cards." },
+      { "name": "station-lift", "value": "0 8px 22px rgba(0,0,0,.30)", "purpose": "Player stations and compact state banners." },
+      { "name": "equipment-lift", "value": "0 18px 42px rgba(0,0,0,.34)", "purpose": "Large table-adjacent bands and waiting surfaces." },
+      { "name": "table-hardware", "value": "0 22px 60px rgba(0,0,0,.38), inset 0 0 0 13px #1A1B18, inset 0 0 0 14px #464842", "purpose": "The dominant oval table and its equipment rings." },
+      { "name": "drawer-lift", "value": "-20px 0 45px rgba(0,0,0,.32)", "purpose": "Table history and settings drawer." },
+      { "name": "modal-lift", "value": "0 30px 80px rgba(0,0,0,.55)", "purpose": "Destructive confirmations and focused admin dialogs." },
+      { "name": "chip-hardware", "value": "inset 0 0 0 3px #4C4E48, inset 0 0 0 5px rgba(255,255,255,.14), 0 6px 12px rgba(0,0,0,.28)", "purpose": "Physical denomination controls." }
+    ],
+    "motion": [
+      { "name": "chip-response", "value": "140ms ease-out", "purpose": "Chip lift and return." },
+      { "name": "control-response", "value": "160ms ease-out", "purpose": "Switches, chevrons, and compact control state changes." },
+      { "name": "panel-enter", "value": "180ms cubic-bezier(.2,.8,.2,1)", "purpose": "Side-panel translation with matched 180ms opacity fade." },
+      { "name": "voice-meter", "value": "1.15s cubic-bezier(.2,.8,.2,1) infinite", "purpose": "Speaking-level bars only." },
+      { "name": "busy-spin", "value": "800ms linear infinite", "purpose": "Explicit loading operations." },
+      { "name": "reduced-motion", "value": "0.01ms; 1 iteration", "purpose": "Reduced-motion fallback for transitions and animation." }
+    ],
+    "breakpoints": [
+      { "name": "wide-compact", "value": "1050px" },
+      { "name": "standard-mobile", "value": "760px" },
+      { "name": "table-portrait", "value": "620px" },
+      { "name": "table-landscape-width", "value": "900px" },
+      { "name": "table-landscape-height", "value": "500px" },
+      { "name": "short-desktop-height", "value": "760px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Command Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single committed action in a compact control group.",
+      "html": "<button class=\"ds-button-primary\" type=\"button\">确认加注 120</button>",
+      "css": ".ds-button-primary { display:inline-flex; min-height:44px; align-items:center; justify-content:center; gap:8px; border:0; border-radius:4px; background:var(--red, #E45445); color:#fff; padding:0 18px; font-family:'Noto Sans SC',sans-serif; font-size:13px; font-weight:700; letter-spacing:0; box-shadow:0 8px 20px rgba(133,45,38,.26); transition:filter 160ms ease-out,transform 160ms ease-out; } .ds-button-primary:hover { filter:brightness(1.06); } .ds-button-primary:focus-visible { outline:2px solid var(--focus, #B9E5D1); outline-offset:3px; } .ds-button-primary:active { transform:translateY(1px); } .ds-button-primary:disabled { background:#383A35; color:#777970; box-shadow:none; }"
+    },
+    {
+      "name": "Square Icon Tool",
+      "kind": "button",
+      "refersTo": "icon-tool",
+      "description": "A fixed square for familiar room and station tools.",
+      "html": "<button class=\"ds-icon-tool\" type=\"button\" aria-label=\"创建牌局\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"/></svg></button>",
+      "css": ".ds-icon-tool { display:grid; width:38px; height:38px; place-items:center; border:1px solid var(--line, #3B3C37); border-radius:4px; background:var(--panel, #1D1E1B); color:var(--bone, #F2EFE8); padding:0; transition:background 160ms ease-out,border-color 160ms ease-out,color 160ms ease-out; } .ds-icon-tool svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; } .ds-icon-tool:hover { border-color:var(--mint, #73C6A0); background:#26342E; color:var(--mint, #73C6A0); } .ds-icon-tool:focus-visible { outline:2px solid var(--focus, #B9E5D1); outline-offset:3px; } .ds-icon-tool:active { background:#1B2B24; }"
+    },
+    {
+      "name": "Recessed Text Field",
+      "kind": "input",
+      "refersTo": "text-input",
+      "description": "The standard dark field for room codes, search, and operational reasons.",
+      "html": "<label class=\"ds-field\"><span>房间代码</span><input type=\"text\" placeholder=\"输入 6 位代码\" /></label>",
+      "css": ".ds-field { display:grid; gap:8px; color:var(--muted, #AAA89F); font-family:'Noto Sans SC',sans-serif; font-size:11px; letter-spacing:0; } .ds-field input { width:260px; min-height:46px; border:1px solid var(--line, #3B3C37); border-radius:4px; background:#151613; color:var(--bone, #F2EFE8); padding:0 13px; font:400 14px/1.4 'Noto Sans SC',sans-serif; caret-color:var(--mint, #73C6A0); transition:border-color 160ms ease-out; } .ds-field input::placeholder { color:#76786F; opacity:1; } .ds-field input:hover { border-color:#5E6059; } .ds-field input:focus { border-color:var(--mint, #73C6A0); outline:1px solid var(--mint, #73C6A0); outline-offset:0; }"
+    },
+    {
+      "name": "Station Navigation",
+      "kind": "nav",
+      "refersTo": "station-nav",
+      "description": "The RF station mark and compact active-route grammar shared by operational headers.",
+      "html": "<nav class=\"ds-station-nav\" aria-label=\"主导航\"><span class=\"ds-station-mark\">RF</span><strong>Royal Flush</strong><a class=\"ds-active\" href=\"#\">牌局</a><a href=\"#\">记录</a><span class=\"ds-service\">服务已连接</span></nav>",
+      "css": ".ds-station-nav { display:flex; width:100%; min-height:68px; align-items:center; gap:8px; border-bottom:1px solid var(--line, #3B3C37); background:var(--ink-raised, #161714); color:var(--bone, #F2EFE8); padding:0 28px; font-family:'Noto Sans SC',sans-serif; letter-spacing:0; } .ds-station-mark { display:grid; width:38px; height:38px; place-items:center; border:2px solid currentColor; margin-right:4px; font:800 13px/1 Arial,sans-serif; } .ds-station-nav strong { margin-right:22px; font-size:14px; } .ds-station-nav a { position:relative; align-self:stretch; display:flex; align-items:center; color:var(--muted, #AAA89F); padding:0 14px; font-size:12px; text-decoration:none; } .ds-station-nav a:hover { color:var(--bone, #F2EFE8); } .ds-station-nav a:focus-visible { outline:2px solid var(--focus, #B9E5D1); outline-offset:-3px; } .ds-station-nav a.ds-active { color:var(--bone, #F2EFE8); } .ds-station-nav a.ds-active::after { position:absolute; right:14px; bottom:-1px; left:14px; height:2px; background:var(--red, #E45445); content:''; } .ds-service { margin-left:auto; color:var(--mint, #73C6A0); font-size:11px; }"
+    },
+    {
+      "name": "System Broadcast",
+      "kind": "custom",
+      "refersTo": "system-broadcast",
+      "description": "A persistent authoritative event strip, not a floating alert card.",
+      "html": "<div class=\"ds-system-broadcast\" role=\"status\"><strong>桌内广播</strong><span>岱奇新增 1,000 局外积分</span><time>23:48:12</time></div>",
+      "css": ".ds-system-broadcast { display:grid; grid-template-columns:112px 1fr auto; min-height:44px; align-items:center; gap:12px; border-bottom:1px solid #4B332F; background:#271C19; color:#E8D1CB; padding:0 28px; font-family:'Noto Sans SC',sans-serif; font-size:11px; letter-spacing:0; } .ds-system-broadcast strong { color:var(--red, #E45445); font-size:10px; } .ds-system-broadcast time { color:#947B75; font:600 11px/1 'Barlow Condensed','Arial Narrow',sans-serif; } .ds-system-broadcast:focus-within { outline:2px solid var(--focus, #B9E5D1); outline-offset:-3px; }"
+    },
+    {
+      "name": "Speaking Player Station",
+      "kind": "card",
+      "refersTo": "player-station",
+      "description": "A stable dual-score station with an explicit mint speaking state.",
+      "html": "<article class=\"ds-player-station ds-speaking\"><header><span class=\"ds-avatar\">DC</span><strong>岱奇</strong><span class=\"ds-meter\" aria-label=\"正在说话\"><i></i><i></i><i></i></span></header><div><span>牌桌分<strong>1,240</strong></span><span>局外积分<strong>980</strong></span></div></article>",
+      "css": ".ds-player-station { width:152px; min-height:64px; border:1px solid #4C4E48; border-radius:6px; background:#1B1C19; color:var(--bone, #F2EFE8); box-shadow:0 8px 22px rgba(0,0,0,.3); padding:8px 9px; font-family:'Noto Sans SC',sans-serif; letter-spacing:0; } .ds-player-station.ds-speaking { border-color:var(--mint, #73C6A0); } .ds-player-station header { display:grid; grid-template-columns:24px 1fr auto; align-items:center; gap:7px; } .ds-player-station header>strong { overflow:hidden; font-size:11px; text-overflow:ellipsis; white-space:nowrap; } .ds-avatar { display:grid; width:24px; height:24px; place-items:center; border-radius:50%; background:#33352F; font-size:9px; } .ds-player-station>div { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:7px; } .ds-player-station>div>span { color:#B5B3AA; font-size:9px; } .ds-player-station>div strong { display:block; margin-top:2px; color:var(--bone, #F2EFE8); font:600 14px/1 'Barlow Condensed','Arial Narrow',sans-serif; } .ds-meter { display:flex; align-items:center; gap:2px; color:var(--mint, #73C6A0); } .ds-meter i { display:block; width:2px; height:7px; background:currentColor; } .ds-meter i:nth-child(2) { height:14px; } .ds-meter i:nth-child(3) { height:10px; } .ds-player-station:focus-within { outline:2px solid var(--focus, #B9E5D1); outline-offset:3px; }"
+    },
+    {
+      "name": "Physical Chip Button",
+      "kind": "chip",
+      "refersTo": "physical-chip",
+      "description": "A repeatable denomination control with physical rings and short travel.",
+      "html": "<button class=\"ds-physical-chip\" type=\"button\" aria-label=\"增加 20 牌桌分\">20</button>",
+      "css": ".ds-physical-chip { display:grid; width:52px; height:52px; place-items:center; border:4px dashed rgba(242,239,232,.73); border-radius:50%; background:#9D493F; color:#fff; box-shadow:inset 0 0 0 3px #9D493F,inset 0 0 0 5px rgba(255,255,255,.14),0 6px 12px rgba(0,0,0,.28); padding:0; font:700 13px/1 'Barlow Condensed','Arial Narrow',sans-serif; letter-spacing:0; transition:transform 140ms ease-out,filter 140ms ease-out; } .ds-physical-chip:hover:not(:disabled) { transform:translateY(-3px); filter:brightness(1.1); } .ds-physical-chip:focus-visible { outline:2px solid var(--focus, #B9E5D1); outline-offset:3px; } .ds-physical-chip:active:not(:disabled) { transform:translateY(0); } .ds-physical-chip:disabled { opacity:.27; }"
+    },
+    {
+      "name": "Face-up Playing Card",
+      "kind": "card",
+      "refersTo": "playing-card",
+      "description": "A bone-white semantic rank-and-suit card; red suits use shape and color together.",
+      "html": "<span class=\"ds-playing-card ds-red\" aria-label=\"红桃A\"><strong>A</strong><span aria-hidden=\"true\">♥</span></span>",
+      "css": ".ds-playing-card { position:relative; display:block; width:54px; height:74px; border-radius:5px; background:var(--bone, #F2EFE8); color:#171815; box-shadow:0 7px 14px rgba(0,0,0,.22); padding:7px; font:700 16px/1 Arial,sans-serif; letter-spacing:0; } .ds-playing-card.ds-red { color:#BE4439; } .ds-playing-card>span { position:absolute; right:7px; bottom:7px; font-size:18px; } .ds-playing-card:focus-visible { outline:2px solid var(--focus, #B9E5D1); outline-offset:3px; }"
+    },
+    {
+      "name": "Operations Metric",
+      "kind": "card",
+      "refersTo": "operations-metric",
+      "description": "A dense admin summary cell that reads as part of one equipment band.",
+      "html": "<section class=\"ds-operations-metric\"><span>活跃房间</span><strong>12</strong><small>8 桌正在出牌</small></section>",
+      "css": ".ds-operations-metric { width:220px; min-height:118px; border:1px solid var(--line, #3B3C37); background:var(--panel, #1D1E1B); color:var(--bone, #F2EFE8); padding:20px; font-family:'Noto Sans SC',sans-serif; letter-spacing:0; } .ds-operations-metric>span { color:var(--muted, #AAA89F); font-size:11px; } .ds-operations-metric>strong { display:block; margin-top:9px; font:600 31px/.9 'Barlow Condensed','Arial Narrow',sans-serif; } .ds-operations-metric>small { display:block; margin-top:15px; color:var(--mint, #73C6A0); font-size:11px; } .ds-operations-metric:hover { background:var(--panel-raised, #252622); } .ds-operations-metric:focus-within { outline:2px solid var(--focus, #B9E5D1); outline-offset:-3px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "深夜电台记分台",
+    "overview": "Royal Flush behaves like a calm event scorekeeper sharing a desk with a warm late-night radio host. A private poker room is presented as a live score broadcast: operational, quiet, precise, and social, with no casino glamour and no suggestion of money or prizes.\n\nWarm graphite equipment, bone-white cards, vermilion action signals, mint voice activity, and amber waiting states make the interface feel like one coherent station. The player application and the operations console share the same restrained materials, compact controls, precise scoring figures, and visible system state; expression comes from those instruments rather than decoration.",
+    "keyCharacteristics": [
+      "Warm graphite equipment surfaces separated by one-pixel seams.",
+      "Bone-white information and cards, with color reserved for operational signals.",
+      "Condensed measurement numerals paired with highly legible Chinese interface copy.",
+      "Compact square tools, restrained rectangular commands, circular physical chips, and one signature oval table.",
+      "Dense, stable layouts built for repeated action and authoritative scanning."
+    ],
+    "rules": [
+      { "name": "The Signal, Never Wash Rule", "body": "Vermilion means committed or urgent action, mint means voice, connection, or success, and amber means waiting or caution; none of them becomes a decorative page tint.", "section": "colors" },
+      { "name": "The Measurement Voice Rule", "body": "Use Barlow Condensed only for quantities and compact identifiers; all commands, names, statuses, and Chinese prose remain in Noto Sans SC.", "section": "typography" },
+      { "name": "The Operational Density Rule", "body": "Preserve scan paths, fixed control tracks, and stable dimensions before adding whitespace; this is a repeated-use score desk, not a marketing composition.", "section": "layout" },
+      { "name": "The Downward Weight Rule", "body": "Shadows must read as physical weight beneath equipment; never replace them with colored glow, neon haze, or a border-plus-halo decoration.", "section": "elevation" },
+      { "name": "The Oval Exception Rule", "body": "Large curvature belongs to the poker table and genuinely circular instruments; do not turn containers, navigation, commands, or status labels into pills.", "section": "shapes" },
+      { "name": "The Stable Command Rule", "body": "Preserve the dimensions and order of score, chip, voice, timer, and legal-action controls across state changes so urgency never causes layout shift.", "section": "components" }
+    ],
+    "dos": [
+      "Do use Warm Graphite as the ground and layer equipment with tonal steps, one-pixel seams, and restrained downward shadows.",
+      "Do reserve Action Vermilion for committed or urgent action, Voice Mint for voice, connection, or success, and Waiting Amber for waiting or caution.",
+      "Do use Noto Sans SC for Chinese interface copy and Barlow Condensed for points, stakes, bets, hand numbers, countdowns, timestamps, and other measurements.",
+      "Do keep controls compact, tactile, keyboard-visible, and dimensionally stable across loading, reconnecting, disabled, success, and error states.",
+      "Do pair every color signal with shape, icon, text, border, position, or opacity, and honor reduced-motion preferences."
+    ],
+    "donts": [
+      "Don't introduce black-and-gold casino styling, green felt, chip-pile decoration, crowns, Las Vegas photography, neon haze, or gambling and money metaphors.",
+      "Don't use decorative cards as page scaffolds, nest cards inside cards, or float every section in a rounded container.",
+      "Don't turn controls, navigation, or status labels into a pill-heavy interface; reserve circles and the large oval for physical instruments and the table.",
+      "Don't use colored glow, blur, or halo as elevation; depth comes from tonal contrast, seams, and broad black shadows with visible offset.",
+      "Don't let voice, animation, decorative imagery, or responsive compression obscure authoritative game state or block legal play."
+    ]
+  }
+}
