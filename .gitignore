@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+.tools/
+*.log
+*.tsbuildinfo
+apps/*/src/**/*.js
+apps/*/vite.config.js
+.DS_Store
+output/playwright/
+.impeccable/review/

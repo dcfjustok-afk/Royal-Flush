@@ -1,0 +1,28 @@
+{
+  "name": "royal-flush",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n web,admin -c green,yellow \"npm run dev -w @royal-flush/web\" \"npm run dev -w @royal-flush/admin\"",
+    "dev:web": "npm run dev -w @royal-flush/web",
+    "dev:admin": "npm run dev -w @royal-flush/admin",
+    "build": "npm run build -w @royal-flush/contracts && npm run build -w @royal-flush/web && npm run build -w @royal-flush/admin",
+    "typecheck": "npm run typecheck -w @royal-flush/contracts && npm run typecheck -w @royal-flush/web && npm run typecheck -w @royal-flush/admin",
+    "test": "npm run test -w @royal-flush/web && npm run test -w @royal-flush/admin",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@types/node": "26.2.0",
+    "@playwright/test": "1.62.1",
+    "concurrently": "9.2.1",
+    "typescript": "5.9.3"
+  },
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
+  }
+}
