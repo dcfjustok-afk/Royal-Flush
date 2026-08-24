@@ -251,9 +251,19 @@ func (s *Server) publicRoom(writer http.ResponseWriter, request *http.Request) {
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"id": snapshot.RoomID, "code": snapshot.RoomCode, "name": snapshot.RoomName,
-		"ownerId": snapshot.OwnerID, "ownerName": ownerName(snapshot), "onlinePlayers": len(snapshot.Players), "maxPlayers": snapshot.Config.MaxPlayers,
+		"ownerId": snapshot.OwnerID, "ownerName": ownerName(snapshot), "onlinePlayers": onlinePlayerCount(snapshot.Players), "maxPlayers": snapshot.Config.MaxPlayers,
 		"config": snapshot.Config, "occupiedSeats": occupiedSeats(snapshot.Players),
 	})
+}
+
+func onlinePlayerCount(players []room.PlayerSnapshot) int {
+	count := 0
+	for _, player := range players {
+		if player.Status != "disconnected" {
+			count++
+		}
+	}
+	return count
 }
 
 func ownerName(snapshot room.TableSnapshot) string {

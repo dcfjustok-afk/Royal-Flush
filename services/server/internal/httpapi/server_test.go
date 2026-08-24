@@ -270,6 +270,14 @@ func TestWebSocketReconnectStartsWithCurrentAuthoritativeSnapshot(t *testing.T) 
 	}
 
 	disconnected := waitForPlayerStatus(t, client, server.URL, created.ID, userHeaders, "disconnected")
+	response = request(t, client, http.MethodGet, server.URL+"/api/v1/rooms/"+created.ID+"/public", nil, nil)
+	var public struct {
+		OnlinePlayers int `json:"onlinePlayers"`
+	}
+	decodeResponse(t, response, &public)
+	if public.OnlinePlayers != 0 {
+		t.Fatalf("disconnected retained seat counted as online: %d", public.OnlinePlayers)
+	}
 	reconnected, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{HTTPHeader: http.Header{"X-User-ID": []string{"reconnect-user"}}})
 	if err != nil {
 		t.Fatal(err)
