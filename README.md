@@ -51,6 +51,10 @@ docker compose up --build
 
 `.env.example` 中的密钥只适用于本机开发。进入共享测试或生产环境前，必须替换数据库密码、LiveKit 密钥、域名、TLS 证书和允许来源，并将 LiveKit 的 `use_external_ip`、TURN 域名及端口范围调整为实际网络配置。
 
+## Zeabur 部署
+
+Zeabur 需要将 PostgreSQL、Redis、Go API、玩家端和运营端拆成五个服务，不能直接部署 `compose.yaml`。从构建计划预览开始的完整步骤、环境变量和首发限制见 [ZEABUR.md](ZEABUR.md)。
+
 ## 单独启动后端
 
 PowerShell 示例：
