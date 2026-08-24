@@ -60,6 +60,7 @@
 | 故障降级 | 部分接口失败保留其他数据；内部 SQL 错误不暴露 | `apps/admin/src/App.test.ts`、`internal/httpapi/server_test.go` |
 | 剪贴板 | 成功才显示已复制；权限拒绝提供手动方案 | `e2e/player.spec.ts` |
 | 可访问与视口 | 键盘表单；语义标签；桌面与横/竖屏完整布局；视觉基线 | Playwright 四视口项目、`e2e/player.spec.ts`、`e2e/admin.spec.ts` |
+| 主题与尺度 | 黑曜/象牙/午夜主题切换与刷新恢复；浏览器配色同步；控件尺寸；整页无横向溢出 | `theme.test.ts`、`e2e/theme.spec.ts`、`docs/design/theme-system.md` |
 | 契约与容量 | OpenAPI/WS 生成物一致；16 连接/4 房间容量冒烟 | `npm run contracts:check`、CI `capacity-smoke` |
 
 ## 合并门禁
