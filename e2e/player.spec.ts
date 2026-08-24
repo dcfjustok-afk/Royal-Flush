@@ -205,6 +205,38 @@ test("刷新当前等候室会保留权威准备状态", async ({ page }, testIn
   await expect(page.locator(".form-message.error")).toHaveCount(0);
 });
 
+test("准备请求进行中刷新会从服务端恢复最终状态", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1440", "代表性桌面项目覆盖提交中刷新");
+  const waiting = structuredClone(playerSnapshot);
+  waiting.street = "waiting";
+  waiting.handNumber = 0;
+  waiting.players = [
+    waiting.players.find((player) => player.id === "me")!,
+    waiting.players.find((player) => player.id === "p1")!,
+  ].map((player) => ({ ...player, isCurrentActor: false, isReady: false }));
+  let commands = 0;
+  await page.route("**/api/v1/rooms/room-saturday/snapshot", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify(waiting),
+  }));
+  await page.route("**/api/v1/rooms/room-saturday/commands", async (route) => {
+    commands++;
+    const local = waiting.players.find((player) => player.isLocal);
+    if (local) local.isReady = true;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ duplicate: false, event: { type: "room.ready_changed" } }) }).catch(() => undefined);
+  });
+
+  await page.goto("/rooms/room-saturday/waiting");
+  await page.getByRole("button", { name: /准备入局/ }).click();
+  await expect(page.getByRole("button", { name: /正在更新/ })).toBeDisabled();
+  await page.reload();
+  await expect(page.getByRole("button", { name: /已准备/ })).toBeVisible();
+  await expect(page.locator(".form-message.error")).toHaveCount(0);
+  expect(commands).toBe(1);
+});
+
 test("跨房失败会保留原房间且重试成功后进入目标房间", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1440", "代表性桌面项目覆盖跨房失败与重试");
   const oldRoom = structuredClone(playerSnapshot);
