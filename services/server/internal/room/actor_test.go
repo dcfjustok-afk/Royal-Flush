@@ -777,6 +777,75 @@ func TestRaiseValidationVersionAndIdempotency(t *testing.T) {
 	}
 }
 
+func TestPlayerActionCommandMatrix(t *testing.T) {
+	t.Run("call then check", func(t *testing.T) {
+		actor := startedTestActor(t)
+		ctx := context.Background()
+		first := currentActorSnapshot(t, actor)
+		if !first.CanCall || first.ToCall == 0 {
+			t.Fatalf("first actor cannot call: %#v", first)
+		}
+		if _, _, err := actor.Handle(ctx, localPlayer(first).ID, ClientCommand{Type: "action.call", RequestID: "matrix-call", ExpectedVersion: first.Version}); err != nil {
+			t.Fatal(err)
+		}
+		second := currentActorSnapshot(t, actor)
+		if !second.CanCheck || second.ToCall != 0 {
+			t.Fatalf("second actor cannot check: %#v", second)
+		}
+		if _, _, err := actor.Handle(ctx, localPlayer(second).ID, ClientCommand{Type: "action.check", RequestID: "matrix-check", ExpectedVersion: second.Version}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	for _, action := range []string{"action.fold", "action.all_in"} {
+		t.Run(action, func(t *testing.T) {
+			actor := startedTestActor(t)
+			snapshot := currentActorSnapshot(t, actor)
+			if _, _, err := actor.Handle(context.Background(), localPlayer(snapshot).ID, ClientCommand{
+				Type: action, RequestID: "matrix-" + strings.TrimPrefix(action, "action."), ExpectedVersion: snapshot.Version,
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestWaitingRoomMessageAndVoiceCommandMatrix(t *testing.T) {
+	ctx := context.Background()
+	actor, err := NewActor(testConfig(), Identity{ID: "owner", Name: "房主"}, score.NewService(nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer actor.Close()
+	if _, err := actor.Join(ctx, Identity{ID: "u2", Name: "玩家二"}, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	validMessage := json.RawMessage(`{"message":"好牌"}`)
+	if _, _, err := actor.Handle(ctx, "u2", ClientCommand{Type: "room.quick_message", RequestID: "quick-valid", Payload: validMessage}); err != nil {
+		t.Fatal(err)
+	}
+	invalidMessage := json.RawMessage(`{"message":"任意文本"}`)
+	if _, _, err := actor.Handle(ctx, "u2", ClientCommand{Type: "room.quick_message", RequestID: "quick-invalid", Payload: invalidMessage}); !errors.Is(err, ErrInvalidQuickMessage) {
+		t.Fatalf("invalid quick message error = %v", err)
+	}
+
+	mute := json.RawMessage(`{"userId":"u2","muted":true}`)
+	if _, _, err := actor.Handle(ctx, "u2", ClientCommand{Type: "voice.mute", RequestID: "mute-forbidden", Payload: mute}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("non-owner mute error = %v", err)
+	}
+	if _, _, err := actor.Handle(ctx, "owner", ClientCommand{Type: "voice.mute", RequestID: "mute-valid", Payload: mute}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := actor.Snapshot(ctx, "u2")
+	if err != nil || !localPlayer(snapshot).IsMuted {
+		t.Fatalf("mute was not reflected in snapshot: %#v err=%v", localPlayer(snapshot), err)
+	}
+	if _, _, err := actor.Handle(ctx, "owner", ClientCommand{Type: "unsupported", RequestID: "unsupported"}); err == nil {
+		t.Fatal("unsupported command was accepted")
+	}
+}
+
 func TestProcessedCommandKeysRemainValidPostgresJSON(t *testing.T) {
 	ctx := context.Background()
 	actor, err := NewActor(testConfig(), Identity{ID: "user-one", Name: "房主"}, score.NewService(nil), nil)
@@ -1318,6 +1387,45 @@ func playerStatus(snapshot TableSnapshot, userID string) string {
 		}
 	}
 	return ""
+}
+
+func startedTestActor(t *testing.T) *Actor {
+	t.Helper()
+	ctx := context.Background()
+	actor, err := NewActor(testConfig(), Identity{ID: "u1", Name: "玩家一"}, score.NewService(nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(actor.Close)
+	if _, err := actor.Join(ctx, Identity{ID: "u2", Name: "玩家二"}, 1); err != nil {
+		t.Fatal(err)
+	}
+	ready := json.RawMessage(`{"ready":true}`)
+	for _, userID := range []string{"u1", "u2"} {
+		if _, _, err := actor.Handle(ctx, userID, ClientCommand{Type: "room.ready", RequestID: "matrix-ready-" + userID, Payload: ready}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := actor.Handle(ctx, "u1", ClientCommand{Type: "game.start", RequestID: "matrix-start"}); err != nil {
+		t.Fatal(err)
+	}
+	return actor
+}
+
+func currentActorSnapshot(t *testing.T, actor *Actor) TableSnapshot {
+	t.Helper()
+	ctx := context.Background()
+	for _, userID := range []string{"u1", "u2"} {
+		snapshot, err := actor.Snapshot(ctx, userID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if localPlayer(snapshot).IsCurrentActor {
+			return snapshot
+		}
+	}
+	t.Fatal("room has no current actor")
+	return TableSnapshot{}
 }
 
 func testConfig() Config {
