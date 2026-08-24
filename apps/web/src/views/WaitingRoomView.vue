@@ -16,7 +16,7 @@ const actionError = ref("");
 const inviteUrl = computed(() => `${location.origin}/invite/${store.snapshot.roomCode}`);
 const isOwner = computed(() => !store.snapshot.ownerId || store.snapshot.ownerId === store.localPlayer?.id);
 const ready = computed(() => Boolean(store.localPlayer?.isReady));
-const readyCount = computed(() => store.snapshot.players.filter((player) => player.isReady).length);
+const readyCount = computed(() => store.snapshot.players.filter((player) => player.isReady && player.status !== "disconnected" && player.status !== "away" && player.tablePoints > 0).length);
 const seats = computed(() => Array.from({ length: 8 }, (_, seat) => ({
   seat,
   player: store.snapshot.players.find((player) => player.seat === seat),
