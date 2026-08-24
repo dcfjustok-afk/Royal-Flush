@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { mockPlayerApi } from "./support/api-mocks";
+import { mockPlayerApi, playerSnapshot } from "./support/api-mocks";
 
 async function expectInsideViewport(locator: Locator, page: Page) {
   const box = await locator.boundingBox();
@@ -91,6 +91,29 @@ test("桌内举报可通过设置面板完整提交", async ({ page }, testInfo)
   await page.getByLabel("问题说明").fill("语音持续出现干扰");
   await page.getByRole("button", { name: "提交举报" }).click();
   await expect(page.locator(".report-feedback.success")).toContainText("举报已登记");
+});
+
+test("房主可以在结算后开始下一手", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1440", "代表性桌面项目覆盖多人续局工作流");
+  const settled = structuredClone(playerSnapshot);
+  settled.street = "settled";
+  settled.actionDeadline = "";
+  settled.players.forEach((player) => (player.isCurrentActor = false));
+
+  await page.route("**/api/v1/rooms/room-saturday/snapshot", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(settled) }));
+  await page.route("**/api/v1/rooms/room-saturday/commands", async (route) => {
+    const command = route.request().postDataJSON() as { type: string };
+    expect(command.type).toBe("game.start");
+    settled.street = "preflop";
+    settled.handNumber++;
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ duplicate: false, event: { type: "game.hand_started" } }) });
+  });
+
+  await page.goto("/rooms/room-saturday/table");
+  await expect(page.getByRole("button", { name: "开始下一手" })).toBeVisible();
+  await page.getByRole("button", { name: "开始下一手" }).click();
+  await expect(page.getByRole("button", { name: "开始下一手" })).toHaveCount(0);
+  await expect(page.locator(".table-telemetry")).toContainText("029");
 });
 
 test("牌桌建立视觉回归基线", async ({ page }) => {

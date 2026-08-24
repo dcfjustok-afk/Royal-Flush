@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ChipDenomination } from "@royal-flush/contracts";
-import { ArrowLeft, Clock3, Copy, History, Mic, MicOff, PanelRightClose, Radio, RefreshCw, Settings, Signal, Users, Wifi, WifiOff } from "@lucide/vue";
+import { ArrowLeft, Clock3, Copy, History, Mic, MicOff, PanelRightClose, Play, Radio, RefreshCw, Settings, Signal, Users, Wifi, WifiOff } from "@lucide/vue";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import BrandMark from "@/components/BrandMark.vue";
@@ -33,6 +33,9 @@ const actionProgress = computed(() => {
 });
 const speakingPlayer = computed(() => store.voiceConnected ? store.snapshot.players.find((player) => player.isSpeaking) : undefined);
 const isOwner = computed(() => Boolean(store.localPlayer && store.snapshot.ownerId === store.localPlayer.id));
+const handSettled = computed(() => store.snapshot.street === "settled");
+const readyForNextHand = computed(() => store.snapshot.players.filter((player) => player.isReady && player.status !== "away" && player.status !== "disconnected" && player.tablePoints > 0).length);
+const canStartNextHand = computed(() => handSettled.value && isOwner.value && readyForNextHand.value >= 2 && !store.commandPending && store.connectionState === "connected");
 const canAct = computed(() => acting.value && !store.commandPending && store.connectionState === "connected");
 const connectionLabel = computed(() => ({ offline: "实时连接离线", connecting: "正在连接牌桌", connected: "连接稳定", reconnecting: "正在恢复牌桌" })[store.connectionState]);
 const voiceConnectionLabel = computed(() => store.voiceConnected ? (store.voiceTransport === "livekit" ? "云端语音已连接" : "直连语音已连接") : "语音未连接");
@@ -87,6 +90,11 @@ async function refill() {
   await playAction(() => store.sendCommand("room.refill").then(() => undefined));
 }
 
+async function startNextHand() {
+  if (!canStartNextHand.value) return;
+  await playAction(() => store.sendCommand("game.start").then(() => undefined));
+}
+
 function selectMicrophone(event: Event) {
   void store.selectMicrophone((event.target as HTMLSelectElement).value);
 }
@@ -120,6 +128,7 @@ onBeforeUnmount(() => {
     <section class="table-stage" aria-label="德州扑克牌桌">
       <div class="table-telemetry"><span :class="{ unstable: store.connectionState !== 'connected' }"><Signal />{{ connectionLabel }}</span><span>手牌 <strong>{{ String(store.snapshot.handNumber).padStart(3, "0") }}</strong></span><span>盲注 <strong>{{ store.roomConfig.blindPreset }}</strong></span></div>
       <div v-if="tableError || (apiMode && store.connectionState !== 'connected')" class="table-state-banner" role="status"><WifiOff /><span>{{ tableError || connectionLabel }}</span><button type="button" :disabled="store.roomLoading" @click="retryConnection"><RefreshCw />{{ store.roomLoading ? "恢复中" : "重新连接" }}</button></div>
+      <div v-else-if="handSettled" class="table-state-banner next-hand" role="status"><Play /><span>{{ isOwner ? (readyForNextHand >= 2 ? "本手已结算，可以开始下一手" : "至少需要两名在线且有牌桌分的玩家") : "本手已结算，等待房主开始下一手" }}</span><button v-if="isOwner" type="button" :disabled="!canStartNextHand" @click="startNextHand"><Play />{{ store.commandPending ? "开牌中" : "开始下一手" }}</button></div>
       <div class="poker-table-shell">
         <div class="poker-table">
           <div class="table-center">
