@@ -95,6 +95,28 @@ go test -race ./...
 
 `go test -race` 在 Windows 上需要可用的 C 编译器。契约检查会重新生成 Go/TypeScript 类型，并在生成结果与仓库不一致时失败。
 
+## 容量基线
+
+容量工具会通过开发环境身份头创建真实房间和座位、保持 WebSocket 连接、开始牌局、提交真实弃牌行动，并在真实断线后验证首帧权威快照。它仅应在隔离的本地或测试环境运行，因为测试账号和房间会保存在目标服务配置的存储中。
+
+先启动开发后端，再从 `services/server` 目录运行完整基线：
+
+```powershell
+go run ./cmd/loadtest `
+  -target http://127.0.0.1:8080 `
+  -connections 1000 `
+  -rooms 120 `
+  -actions 120 `
+  -reconnects 120 `
+  -output capacity-report.json
+```
+
+默认验收条件为行动确认 p95 不超过 `200ms`、所有重连首帧不超过 `3s`，任一指标失败时命令返回非零退出码。报告为机器可读 JSON。用于本地快速检查或 CI 的缩小烟测可以使用：
+
+```powershell
+go run ./cmd/loadtest -connections 16 -rooms 4 -actions 4 -reconnects 4
+```
+
 ## 当前运行边界
 
 - 非开发环境的短信验证码目前只生成挑战码，尚未接入真实短信服务商。
