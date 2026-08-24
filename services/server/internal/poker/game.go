@@ -43,6 +43,7 @@ type Player struct {
 	AllIn           bool   `json:"allIn"`
 	Away            bool   `json:"away"`
 	Disconnected    bool   `json:"disconnected"`
+	Leaving         bool   `json:"leaving"`
 	Ready           bool   `json:"ready"`
 }
 
@@ -115,6 +116,63 @@ func (g *Game) Refill(seat int) error {
 	player.Stack += 1000
 	player.Allocated += 1000
 	player.Away = false
+	g.Version++
+	return nil
+}
+
+func (g *Game) Withdraw(seat int) error {
+	player := g.player(seat)
+	if player == nil {
+		return ErrIllegalAction
+	}
+	player.Leaving = true
+	player.Disconnected = false
+	if !g.InHand() {
+		player.Away = true
+		g.Version++
+		return nil
+	}
+	if player.AllIn {
+		g.Version++
+		return nil
+	}
+	player.Folded = true
+	if seat == g.Actor {
+		g.finishAction(seat, false, false)
+		return nil
+	}
+	delete(g.pending, seat)
+	if g.remainingNotFolded() == 1 {
+		g.finishByFold()
+		return nil
+	}
+	g.prunePending()
+	if len(g.pending) == 0 {
+		return g.advanceStreet()
+	}
+	g.Version++
+	return nil
+}
+
+func (g *Game) RemoveSeat(seat int) (*Player, error) {
+	if g.InHand() {
+		return nil, ErrHandInProgress
+	}
+	player := g.player(seat)
+	if player == nil {
+		return nil, ErrIllegalAction
+	}
+	g.Seats[seat] = nil
+	g.Version++
+	return player, nil
+}
+
+func (g *Game) SetDisconnected(seat int, disconnected bool) error {
+	player := g.player(seat)
+	if player == nil {
+		return ErrIllegalAction
+	}
+	player.Disconnected = disconnected
 	g.Version++
 	return nil
 }
@@ -516,11 +574,11 @@ func (g *Game) requireActor(seat int) (*Player, error) {
 }
 
 func (g *Game) available(player *Player) bool {
-	return player != nil && !player.Away && player.Stack > 0
+	return player != nil && !player.Away && !player.Leaving && player.Stack > 0
 }
 
 func (g *Game) canAct(player *Player) bool {
-	return player != nil && !player.Away && !player.Folded && !player.AllIn && player.Stack > 0
+	return player != nil && !player.Away && !player.Leaving && !player.Folded && !player.AllIn && player.Stack > 0
 }
 
 func (g *Game) activeSeats() []int {
