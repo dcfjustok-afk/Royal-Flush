@@ -206,7 +206,7 @@ func (g *Game) StartHand() error {
 			player.Away = true
 		}
 	}
-	g.Button = g.nextSeat(g.Button, func(player *Player) bool { return player != nil && !player.Away && player.Stack > 0 })
+	g.Button = g.nextSeat(g.Button, g.available)
 	active := g.activeSeats()
 	if len(active) == 2 {
 		g.SmallBlindSeat = g.Button
@@ -507,7 +507,7 @@ func (g *Game) showdown() error {
 func (g *Game) finishByFold() {
 	winner := -1
 	for seat, player := range g.Seats {
-		if player != nil && !player.Folded && player.HandCommitted >= 0 && !player.Away {
+		if player != nil && !player.Folded && !player.Away && len(player.Hole) == 2 {
 			winner = seat
 			break
 		}

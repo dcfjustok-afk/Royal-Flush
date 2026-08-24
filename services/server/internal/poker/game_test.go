@@ -76,6 +76,29 @@ func TestStartHandExcludesUnreadyAndDisconnectedPlayers(t *testing.T) {
 	}
 }
 
+func TestFoldAwardsPotOnlyToAPlayerDealtIntoTheHand(t *testing.T) {
+	game, _ := NewGame(3, 5, 10)
+	_, _ = game.Sit("spectator", "旁观者", 0, "s1")
+	_, _ = game.Sit("ready-one", "玩家一", 1, "s2")
+	_, _ = game.Sit("ready-two", "玩家二", 2, "s3")
+	game.Seats[1].Ready = true
+	game.Seats[2].Ready = true
+	if err := game.StartHand(); err != nil {
+		t.Fatal(err)
+	}
+	actor := game.Actor
+	winner := map[int]int{1: 2, 2: 1}[actor]
+	if err := game.Fold(actor); err != nil {
+		t.Fatal(err)
+	}
+	if game.Seats[0].Stack != 1000 {
+		t.Fatalf("spectator received the pot: stack=%d", game.Seats[0].Stack)
+	}
+	if game.Seats[winner].Stack <= 1000 {
+		t.Fatalf("remaining participant did not receive the pot: seat=%d stack=%d", winner, game.Seats[winner].Stack)
+	}
+}
+
 func TestCumulativeShortAllInsReopenRaise(t *testing.T) {
 	game, _ := NewGame(3, 5, 10)
 	game.Street = StreetPreflop
