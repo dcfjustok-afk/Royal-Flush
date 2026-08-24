@@ -29,6 +29,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** @description 仅用于本地开发兼容；生产账号使用手机号与密码。 */
         post: operations["requestOtp"];
         delete?: never;
         options?: never;
@@ -46,6 +47,54 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["verifyOtp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/register": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["registerAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["loginAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["logoutAccount"];
         delete?: never;
         options?: never;
         head?: never;
@@ -81,7 +130,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        patch: operations["updateMe"];
         trace?: never;
     };
     "/me/score-additions": {
@@ -216,6 +265,25 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["createVoiceToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rooms/{roomID}/voice-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roomID: components["parameters"]["RoomID"];
+            };
+            cookie?: never;
+        };
+        /** @description 将已登录且已入座的用户升级到 WebSocket，转发 WebRTC SDP 与 ICE 信令。 */
+        get: operations["connectVoiceEvents"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -406,6 +474,16 @@ export interface components {
             banned: boolean;
             /** Format: date-time */
             createdAt: string;
+        };
+        AuthResult: {
+            user: components["schemas"]["User"];
+            /** Format: int64 */
+            balance: number;
+        };
+        ICEServer: {
+            urls: string[];
+            username?: string;
+            credential?: string;
         };
         RoomConfig: {
             name: string;
@@ -680,6 +758,7 @@ export interface operations {
                     };
                 };
             };
+            503: components["responses"]["Problem"];
         };
     };
     verifyOtp: {
@@ -709,6 +788,87 @@ export interface operations {
                         user: components["schemas"]["User"];
                         /** Format: int64 */
                         balance: number;
+                    };
+                };
+            };
+        };
+    };
+    registerAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    phone: string;
+                    password: string;
+                    nickname: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 注册成功并建立持久会话 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthResult"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    loginAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    phone: string;
+                    password: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 登录成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthResult"];
+                };
+            };
+            401: components["responses"]["Problem"];
+        };
+    };
+    logoutAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 当前会话已注销 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
                     };
                 };
             };
@@ -768,6 +928,38 @@ export interface operations {
                     };
                 };
             };
+        };
+    };
+    updateMe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    nickname: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 账号资料已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        user: components["schemas"]["User"];
+                        /** Format: int64 */
+                        balance: number;
+                        activeRoomId: string;
+                    };
+                };
+            };
+            400: components["responses"]["Problem"];
         };
     };
     addScore: {
@@ -976,7 +1168,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description LiveKit 凭证或明确的禁用回退 */
+            /** @description LiveKit 凭证或浏览器 WebRTC 降级配置 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -984,14 +1176,39 @@ export interface operations {
                 content: {
                     "application/json": {
                         enabled: boolean;
+                        /** @enum {string} */
+                        transport?: "livekit" | "webrtc";
                         url?: string;
                         accessToken?: string;
+                        iceServers?: components["schemas"]["ICEServer"][];
                         /** Format: date-time */
                         expiresAt?: string;
                         reason?: string;
                     };
                 };
             };
+        };
+    };
+    connectVoiceEvents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roomID: components["parameters"]["RoomID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description WebSocket 已建立 */
+            101: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
         };
     };
     createReport: {

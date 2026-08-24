@@ -393,6 +393,120 @@ func TestOperationsUserRoomReportAndAuditFlows(t *testing.T) {
 	response.Body.Close()
 }
 
+func TestAccountRegistrationSessionProfileAndLogout(t *testing.T) {
+	application := New(Config{Development: false}, nil)
+	t.Cleanup(application.Close)
+	server := httptest.NewServer(application.Handler())
+	defer server.Close()
+	client := server.Client()
+
+	response := request(t, client, http.MethodPost, server.URL+"/api/v1/auth/register", map[string]any{
+		"phone": "13800138000", "password": "table2026", "nickname": "小北",
+	}, nil)
+	if response.StatusCode != http.StatusCreated || len(response.Cookies()) != 1 {
+		t.Fatalf("register status/cookie = %d/%d: %s", response.StatusCode, len(response.Cookies()), readBody(response))
+	}
+	session := response.Cookies()[0]
+	var registered struct {
+		User struct {
+			ID       string `json:"id"`
+			Nickname string `json:"nickname"`
+		} `json:"user"`
+	}
+	decodeResponse(t, response, &registered)
+	if registered.User.ID == "" || registered.User.Nickname != "小北" {
+		t.Fatalf("unexpected registered account: %#v", registered)
+	}
+
+	response = request(t, client, http.MethodPatch, server.URL+"/api/v1/me", map[string]any{"nickname": "小北新名"}, map[string]string{"Cookie": session.String()})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("update profile status = %d: %s", response.StatusCode, readBody(response))
+	}
+	var profile struct {
+		User struct {
+			Nickname string `json:"nickname"`
+		} `json:"user"`
+	}
+	decodeResponse(t, response, &profile)
+	if profile.User.Nickname != "小北新名" {
+		t.Fatalf("updated nickname = %q", profile.User.Nickname)
+	}
+
+	response = request(t, client, http.MethodPost, server.URL+"/api/v1/auth/logout", nil, map[string]string{"Cookie": session.String()})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("logout status = %d", response.StatusCode)
+	}
+	response.Body.Close()
+	response = request(t, client, http.MethodGet, server.URL+"/api/v1/me", nil, map[string]string{"Cookie": session.String()})
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("logged-out session status = %d", response.StatusCode)
+	}
+	response.Body.Close()
+
+	response = request(t, client, http.MethodPost, server.URL+"/api/v1/auth/login", map[string]any{
+		"phone": "13800138000", "password": "table2026",
+	}, nil)
+	if response.StatusCode != http.StatusOK || len(response.Cookies()) != 1 {
+		t.Fatalf("login status/cookie = %d/%d: %s", response.StatusCode, len(response.Cookies()), readBody(response))
+	}
+	response.Body.Close()
+}
+
+func TestVoiceWebSocketRelaysSignalsBetweenSeatedUsers(t *testing.T) {
+	application := New(Config{Development: true}, nil)
+	t.Cleanup(application.Close)
+	server := httptest.NewServer(application.Handler())
+	defer server.Close()
+	client := server.Client()
+	roomBody := map[string]any{
+		"name": "语音信令桌", "maxPlayers": 2, "blindPreset": "5/10", "actionSeconds": 20,
+		"voiceEnabled": true, "chipDenominations": []int{5, 10, 20, 50, 100},
+	}
+	response := request(t, client, http.MethodPost, server.URL+"/api/v1/rooms", roomBody, map[string]string{"X-User-ID": "voice-u1", "X-User-Name": "玩家一"})
+	var created struct {
+		ID string `json:"id"`
+	}
+	decodeResponse(t, response, &created)
+	response = request(t, client, http.MethodPost, server.URL+"/api/v1/rooms/"+created.ID+"/join", map[string]any{"seat": 1}, map[string]string{"X-User-ID": "voice-u2", "X-User-Name": "玩家二"})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("join room status = %d: %s", response.StatusCode, readBody(response))
+	}
+	response.Body.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/v1/rooms/" + created.ID + "/voice-events"
+	first, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{HTTPHeader: http.Header{"X-User-ID": []string{"voice-u1"}, "X-User-Name": []string{"玩家一"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close(websocket.StatusNormalClosure, "test complete")
+	var event voiceServerEvent
+	if err := wsjson.Read(ctx, first, &event); err != nil || event.Type != "voice.peers" || len(event.Peers) != 0 {
+		t.Fatalf("first peer list = %#v, err = %v", event, err)
+	}
+
+	second, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{HTTPHeader: http.Header{"X-User-ID": []string{"voice-u2"}, "X-User-Name": []string{"玩家二"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close(websocket.StatusNormalClosure, "test complete")
+	if err := wsjson.Read(ctx, second, &event); err != nil || event.Type != "voice.peers" || len(event.Peers) != 1 || event.Peers[0].UserID != "voice-u1" {
+		t.Fatalf("second peer list = %#v, err = %v", event, err)
+	}
+	if err := wsjson.Read(ctx, first, &event); err != nil || event.Type != "voice.peer_joined" || event.UserID != "voice-u2" {
+		t.Fatalf("join event = %#v, err = %v", event, err)
+	}
+
+	description := voiceClientMessage{Type: "voice.description", TargetUserID: "voice-u2", Payload: json.RawMessage(`{"type":"offer","sdp":"test-offer"}`)}
+	if err := wsjson.Write(ctx, first, description); err != nil {
+		t.Fatal(err)
+	}
+	if err := wsjson.Read(ctx, second, &event); err != nil || event.Type != "voice.signal" || event.FromUserID != "voice-u1" || event.SignalType != "voice.description" {
+		t.Fatalf("relayed signal = %#v, err = %v", event, err)
+	}
+}
+
 func request(t *testing.T, client *http.Client, method, url string, body any, headers map[string]string) *http.Response {
 	t.Helper()
 	var reader io.Reader

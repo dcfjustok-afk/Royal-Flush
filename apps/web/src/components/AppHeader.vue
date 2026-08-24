@@ -19,7 +19,7 @@ const store = useGameStore();
       <span class="score-readout"><small>局外积分</small><strong>{{ store.accountPoints?.toLocaleString("zh-CN") ?? "--" }}</strong></span>
       <RouterLink class="icon-button" to="/rooms/new" title="创建牌局" aria-label="创建牌局"><Plus /></RouterLink>
       <button class="icon-button" type="button" title="通知" aria-label="通知"><Bell /></button>
-      <RouterLink class="account-button" to="/profile"><CircleUserRound /><span>{{ store.currentUser?.nickname ?? "未登录" }}</span><VoiceMeter :active="store.microphoneEnabled" label="麦克风已开启" /></RouterLink>
+      <RouterLink class="account-button" :to="store.currentUser ? '/profile' : '/account'" :aria-label="store.currentUser ? `账号：${store.currentUser.nickname}` : '登录或注册'"><CircleUserRound /><span>{{ store.currentUser?.nickname ?? "登录 / 注册" }}</span><VoiceMeter :active="store.microphoneEnabled" label="麦克风已开启" /></RouterLink>
     </div>
   </header>
 </template>

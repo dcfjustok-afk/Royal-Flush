@@ -91,15 +91,16 @@ API_UPSTREAM=http://${SERVER_HOST}:8080
 - 运营端空状态不再展示假房间、假用户、假举报或假审计。
 - 运营端封禁、举报处理、房间详情在服务未配置时不会本地伪造结果。
 - 新增管理员账号密码登录后端接口、前端登录页、OpenAPI 路径和测试。
+- 玩家账号已改为手机号与密码注册登录；用户、bcrypt 密码哈希和哈希会话令牌保存在 PostgreSQL，可跨重启恢复。
+- 语音在 LiveKit 未配置时自动使用同源 WebRTC 信令降级；生产严格 NAT 网络仍建议配置 TURN。
 - Playwright 使用仅存在于 `e2e/support` 的权威 API fixtures，不再依赖运行时演示数据，并覆盖管理员账号密码登录。
 - CI Action 固定到完整 commit SHA，增加三镜像构建门禁、失败诊断产物与部署后自动冒烟。
 
 未完成或需要上线前确认：
 
 - Zeabur `server` 服务需要设置 `ADMIN_ACCOUNT` 和 `ADMIN_PASSWORD`；本仓库不包含真实密码。
-- `ENVIRONMENT=development` 仍需在正式环境改为 production，并接入真实短信前再开放玩家手机号登录。
-- `LIVEKIT_*` 当前为空，语音仍是可选降级状态。
-- 本地环境未安装 Go，当前会话无法运行 `gofmt`、Go tests 和 Go contract generator；CI/Zeabur 构建环境应执行完整 Go 检查。
+- Zeabur `server` 正式环境需要使用 `ENVIRONMENT=production`；OTP 仅保留为开发兼容接口。
+- `LIVEKIT_*` 可以为空，此时自动使用 WebRTC；严格 NAT 网络需要 `VOICE_ICE_URLS` 中的 TURN 配置。
 - 尚未执行线上 PostgreSQL 业务数据清理；清理前必须先只读统计业务表，再精确删除测试记录，不删除 schema、migration、服务或卷。
 - GitHub `production` 环境由部署后冒烟工作流维护，玩家端地址不再依赖 Zeabur 回写的空 `environment_url`。
 

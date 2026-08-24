@@ -17,6 +17,21 @@ test.beforeEach(async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
 });
 
+test("玩家可以注册持久账号并进入大厅", async ({ page }, testInfo) => {
+  await page.unroute("**/api/v1/**");
+  await mockPlayerApi(page, { authenticated: false });
+  await page.goto("/account");
+  await expect(page.getByRole("heading", { name: "回到你的牌桌" })).toBeVisible();
+  if (testInfo.project.name === "desktop-1440") await expect(page.locator(".account-page")).toHaveScreenshot("account.png");
+  await page.getByRole("tab", { name: "注册" }).click();
+  await page.getByLabel("显示名称").fill("新玩家");
+  await page.getByLabel("手机号").fill("13800138000");
+  await page.getByLabel("密码", { exact: true }).fill("table2026");
+  await page.getByRole("button", { name: /注册并登录/ }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("link", { name: "账号：新玩家" })).toBeVisible();
+});
+
 test("牌桌在目标视口内保持完整且筹码不会改变布局", async ({ page }) => {
   await page.goto("/rooms/room-saturday/table");
   await expect(page.locator(".table-app")).toBeVisible();

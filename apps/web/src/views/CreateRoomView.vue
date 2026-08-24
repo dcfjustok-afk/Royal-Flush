@@ -2,7 +2,7 @@
 import type { BlindPreset, ChipDenomination, RoomConfig } from "@royal-flush/contracts";
 import { BASE_CHIP_DENOMINATIONS, LARGE_CHIP_DENOMINATIONS } from "@royal-flush/contracts";
 import { ArrowLeft, ArrowRight, Check, Headphones, LockKeyhole } from "@lucide/vue";
-import { computed, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 import AppHeader from "@/components/AppHeader.vue";
 import { useGameStore } from "@/stores/game";
@@ -36,6 +36,12 @@ async function createRoom() {
     submitting.value = false;
   }
 }
+
+onMounted(async () => {
+  await store.probeBackend();
+  await store.refreshAccount().catch(() => undefined);
+  if (!store.currentUser) await router.replace("/account?redirect=/rooms/new");
+});
 </script>
 
 <template>

@@ -12,17 +12,26 @@ import (
 )
 
 type Config struct {
-	URL       string
-	APIKey    string
-	APISecret string
+	URL        string
+	APIKey     string
+	APISecret  string
+	ICEServers []ICEServer
+}
+
+type ICEServer struct {
+	URLs       []string `json:"urls"`
+	Username   string   `json:"username,omitempty"`
+	Credential string   `json:"credential,omitempty"`
 }
 
 type Token struct {
-	Enabled     bool      `json:"enabled"`
-	URL         string    `json:"url,omitempty"`
-	AccessToken string    `json:"accessToken,omitempty"`
-	ExpiresAt   time.Time `json:"expiresAt,omitempty"`
-	Reason      string    `json:"reason,omitempty"`
+	Enabled     bool        `json:"enabled"`
+	Transport   string      `json:"transport,omitempty"`
+	URL         string      `json:"url,omitempty"`
+	AccessToken string      `json:"accessToken,omitempty"`
+	ICEServers  []ICEServer `json:"iceServers,omitempty"`
+	ExpiresAt   time.Time   `json:"expiresAt,omitempty"`
+	Reason      string      `json:"reason,omitempty"`
 }
 
 func (c Config) Enabled() bool {
@@ -31,7 +40,11 @@ func (c Config) Enabled() bool {
 
 func (c Config) Issue(userID, nickname, roomID string, now time.Time) (Token, error) {
 	if !c.Enabled() {
-		return Token{Enabled: false, Reason: "语音服务未配置，牌局仍可正常进行"}, nil
+		iceServers := append([]ICEServer(nil), c.ICEServers...)
+		if len(iceServers) == 0 {
+			iceServers = []ICEServer{{URLs: []string{"stun:stun.l.google.com:19302"}}}
+		}
+		return Token{Enabled: true, Transport: "webrtc", ICEServers: iceServers, Reason: "使用浏览器直连语音"}, nil
 	}
 	if userID == "" || roomID == "" {
 		return Token{}, errors.New("user and room are required")
@@ -69,5 +82,5 @@ func (c Config) Issue(userID, nickname, roomID string, now time.Time) (Token, er
 	mac := hmac.New(sha256.New, []byte(c.APISecret))
 	_, _ = mac.Write([]byte(unsigned))
 	signature := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-	return Token{Enabled: true, URL: c.URL, AccessToken: unsigned + "." + signature, ExpiresAt: expiresAt}, nil
+	return Token{Enabled: true, Transport: "livekit", URL: c.URL, AccessToken: unsigned + "." + signature, ExpiresAt: expiresAt}, nil
 }

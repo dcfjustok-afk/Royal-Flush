@@ -83,7 +83,10 @@ func main() {
 		AllowedOrigins: splitCSV(os.Getenv("ALLOWED_ORIGINS")),
 		AdminAccount:   os.Getenv("ADMIN_ACCOUNT"),
 		AdminPassword:  os.Getenv("ADMIN_PASSWORD"),
-		Voice:          voice.Config{URL: os.Getenv("LIVEKIT_URL"), APIKey: os.Getenv("LIVEKIT_API_KEY"), APISecret: os.Getenv("LIVEKIT_API_SECRET")},
+		Voice: voice.Config{
+			URL: os.Getenv("LIVEKIT_URL"), APIKey: os.Getenv("LIVEKIT_API_KEY"), APISecret: os.Getenv("LIVEKIT_API_SECRET"),
+			ICEServers: voiceServers(splitCSV(env("VOICE_ICE_URLS", "stun:stun.l.google.com:19302")), os.Getenv("VOICE_TURN_USERNAME"), os.Getenv("VOICE_TURN_CREDENTIAL")),
+		},
 		Readiness: func(ctx context.Context) error {
 			for _, check := range readinessChecks {
 				if err := check(ctx); err != nil {
@@ -98,6 +101,7 @@ func main() {
 		AdminPhones:  stringSet(splitCSV(os.Getenv("ADMIN_PHONES"))),
 	}
 	if database != nil {
+		applicationConfig.AuthStore = database
 		applicationConfig.ScoreStore = database
 		applicationConfig.RoomStore = database
 		applicationConfig.Operations = database
@@ -159,4 +163,11 @@ func stringSet(values []string) map[string]bool {
 		result[value] = true
 	}
 	return result
+}
+
+func voiceServers(urls []string, username, credential string) []voice.ICEServer {
+	if len(urls) == 0 {
+		return nil
+	}
+	return []voice.ICEServer{{URLs: urls, Username: username, Credential: credential}}
 }

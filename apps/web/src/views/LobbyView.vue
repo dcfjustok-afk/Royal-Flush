@@ -41,7 +41,7 @@ onMounted(async () => {
       <section class="lobby-command">
         <div class="lobby-heading">
           <div><h1>今晚的牌局</h1><p>好友桌、桌内语音和积分记录都在这里。</p></div>
-          <RouterLink class="button primary" to="/rooms/new"><Plus />创建牌局</RouterLink>
+          <RouterLink class="button primary" :to="store.currentUser ? '/rooms/new' : '/account?redirect=/rooms/new'"><Plus />{{ store.currentUser ? "创建牌局" : "登录后创建" }}</RouterLink>
         </div>
 
         <div v-if="hasActiveRoom" class="active-room-band">
@@ -62,7 +62,8 @@ onMounted(async () => {
         <section class="score-section">
           <header><h2>局外积分</h2><RouterLink to="/profile">查看账本<ArrowRight /></RouterLink></header>
           <div class="large-score"><strong>{{ store.accountPoints?.toLocaleString("zh-CN") ?? "--" }}</strong><span>账号共享余额</span></div>
-          <ScoreAddPanel />
+          <ScoreAddPanel v-if="store.currentUser" />
+          <RouterLink v-else class="account-required" to="/account"><strong>登录后管理积分</strong><span>账号余额与账本会跨设备保留</span><ArrowRight /></RouterLink>
         </section>
       </div>
 

@@ -91,15 +91,13 @@ Start: node index.js
 
 `ZBPACK_DOCKERFILE_NAME` 的值必须写 `server`，不能写成 `Dockerfile.server`。
 
-首次预览部署必须暂时保留：
+玩家账号已经使用手机号和密码，并把密码哈希、资料和会话保存在 PostgreSQL。正式服务应使用：
 
 ```dotenv
-ENVIRONMENT=development
+ENVIRONMENT=production
 ```
 
-在此模式下验证码固定为 `123456`，并由接口返回给登录页面。它只适合限制访问的功能验收，任何人都可以为任意格式正确的手机号请求并使用这个验证码，不可作为公开生产配置。
-
-当前仓库尚未接入真实短信服务商。直接改成 `ENVIRONMENT=production` 后，服务虽然会生成随机验证码，但不会把验证码发送给用户，所有新登录都会失败。接入短信发送、频率限制和共享会话存储后，才能切换生产模式。
+`development` 模式仍会为旧 OTP 接口返回固定验证码，只适合本地验收，不能用于公开环境。玩家端正式入口不再依赖短信验证码。
 
 ## 4. 部署玩家端
 
@@ -127,7 +125,7 @@ API_UPSTREAM=http://${SERVER_HOST}:8080
 5. 将健康检查路径设为 `/`。
 6. 为 `admin` 绑定与玩家端不同的 HTTPS 域名。
 
-运营端首次打开时要求管理员账号和密码登录。账号与密码只通过 `ADMIN_ACCOUNT`、`ADMIN_PASSWORD` 环境变量注入服务端，不写入前端代码、仓库或日志；玩家端仍使用手机号验证码登录。玩家端和运营端域名不同，所以两边需要分别登录一次。
+运营端首次打开时要求管理员账号和密码登录。账号与密码只通过 `ADMIN_ACCOUNT`、`ADMIN_PASSWORD` 环境变量注入服务端，不写入前端代码、仓库或日志；玩家端使用自己的手机号与密码注册登录。玩家端和运营端域名不同，所以两边需要分别登录一次。
 
 ## 6. 配置按路径重部署
 
@@ -154,7 +152,7 @@ PostgreSQL 和 Redis 是独立数据服务，不关联 Git 仓库，也不会因
 
 ## 7. 配置语音
 
-首次部署可以把三个 `LIVEKIT_*` 变量留空。语音不可用不会阻止牌局继续，便于先验证身份、房间、积分和实时牌局。
+首次部署可以把三个 `LIVEKIT_*` 变量留空。此时玩家端会自动使用浏览器 WebRTC 直连语音，不影响房间、积分和实时牌局。
 
 需要语音时，建议创建 LiveKit Cloud 项目，并在 `server` 服务中设置：
 
@@ -166,17 +164,25 @@ LIVEKIT_API_SECRET=你的-api-secret
 
 不要把真实密钥写进 Git。自托管 LiveKit 需要额外处理 WebSocket 信令、RTC TCP/UDP、外部 IP、TURN 和媒体端口范围，不适合作为这次 Zeabur 首发部署的一部分。
 
+浏览器降级至少需要 STUN；为覆盖公司网、校园网和对称 NAT，建议使用可信 TURN 服务：
+
+```dotenv
+VOICE_ICE_URLS=stun:stun.l.google.com:19302,turns:你的-turn-地址:5349
+VOICE_TURN_USERNAME=你的-turn-用户名
+VOICE_TURN_CREDENTIAL=你的-turn-密码
+```
+
 ## 8. 验收顺序
 
 按以下顺序验证，出现问题时更容易定位到具体服务：
 
 1. `server` 日志显示 PostgreSQL migration 成功，并开始监听 Zeabur 注入的端口。
 2. `https://玩家域名/api/v1/ready` 返回 `{"status":"ready"...}`。
-3. 玩家域名能打开邀请/大厅页面，使用预览验证码 `123456` 完成登录。
+3. 玩家域名能打开账号页面，完成手机号和密码注册、退出与重新登录，刷新后登录状态仍保留。
 4. 创建房间后，第二个浏览器会话可以加入；行动和断线重连正常。
 5. 运营域名能使用 `ADMIN_ACCOUNT`、`ADMIN_PASSWORD` 登录，并看到用户、房间、举报和审计数据。
 6. 执行全站积分重置前填写原因并完成二次确认；活跃牌局不应中断。
-7. 配置 LiveKit Cloud 后，再验证麦克风授权、设备切换、房主禁言和语音断线降级。
+7. 用两个已入座浏览器验证麦克风授权、设备切换、房主禁言和断线重连；再配置 LiveKit Cloud 验证自动优先使用 LiveKit。
 8. 合并一个只修改 `apps/web` 的测试 Pull Request，确认 CI 的 `Deployment gate` 通过后只有 `web` 产生新部署。
 9. 在 Zeabur 部署记录中确认 commit SHA 与 GitHub `main` 最新提交一致。
 10. 在 GitHub Actions 中确认 `Production smoke / Verify production` 通过，并可从 `production` 环境直接打开玩家端。
@@ -185,7 +191,7 @@ LIVEKIT_API_SECRET=你的-api-secret
 
 | 服务     | 必填变量                                                                                            | 可选变量                                               |
 | -------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| `server` | `ZBPACK_DOCKERFILE_NAME`、`ENVIRONMENT`、`DATABASE_URL`、`REDIS_URL`、`INSTANCE_ID`、`ADMIN_ACCOUNT`、`ADMIN_PASSWORD` | `LIVEKIT_URL`、`LIVEKIT_API_KEY`、`LIVEKIT_API_SECRET` |
+| `server` | `ZBPACK_DOCKERFILE_NAME`、`ENVIRONMENT`、`DATABASE_URL`、`REDIS_URL`、`INSTANCE_ID`、`ADMIN_ACCOUNT`、`ADMIN_PASSWORD` | `LIVEKIT_*`、`VOICE_ICE_URLS`、`VOICE_TURN_USERNAME`、`VOICE_TURN_CREDENTIAL` |
 | `web`    | `ZBPACK_DOCKERFILE_NAME`、`API_UPSTREAM`                                                            | 无                                                     |
 | `admin`  | `ZBPACK_DOCKERFILE_NAME`、`API_UPSTREAM`                                                            | 无                                                     |
 
@@ -193,9 +199,9 @@ LIVEKIT_API_SECRET=你的-api-secret
 
 ## 上线前仍需完成
 
-- 接入真实短信服务商，并为验证码请求增加防滥用策略。
-- 将登录 challenge、用户和 session 从单进程内存迁移到共享持久化存储；在此之前 `server` 只能运行一个实例，重启后用户需要重新登录。
-- 为玩家域名配置访问控制或仅邀请范围，避免 development OTP 暴露给公网。
+- 若重新启用 OTP 登录，需先接入真实短信服务商并增加防滥用策略；公开环境必须使用 `ENVIRONMENT=production`。
+- 为密码注册和登录增加跨实例共享的边缘限流/WAF 策略。
+- 为 WebRTC 降级配置生产 TURN，或配置 LiveKit Cloud，覆盖严格 NAT 网络。
 - 完成 ICP、隐私政策、用户协议、手机号和语音个人信息处理、未成年人策略及非博彩边界专项合规审查。
 - 配置日志、备份、告警和 PostgreSQL 恢复演练，再开放长期使用。
 
