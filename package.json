@@ -19,6 +19,7 @@
     "test": "npm run test -w @royal-flush/web && npm run test -w @royal-flush/admin",
     "pretest:e2e": "npm run contracts:build",
     "test:e2e": "playwright test",
+    "smoke:production": "node scripts/smoke-production.mjs",
     "contracts:generate": "openapi-typescript api/openapi.yaml -o packages/contracts/src/generated/http.ts && json2ts -i api/websocket.schema.json -o packages/contracts/src/generated/websocket.ts && npm run contracts:generate:go",
     "contracts:generate:go": "go run github.com/atombender/go-jsonschema@v0.16.0 -p generated --only-models --capitalization ID -o services/server/internal/generated/websocket.go api/websocket.schema.json",
     "contracts:check": "npm run contracts:generate && git diff --exit-code -- packages/contracts/src/generated services/server/internal/generated"

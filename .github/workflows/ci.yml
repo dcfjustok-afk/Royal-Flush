@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -16,12 +18,13 @@ jobs:
   go:
     name: Go tests and vet
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: services/server
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: services/server/go.mod
           cache-dependency-path: services/server/go.sum
@@ -35,13 +38,14 @@ jobs:
   node:
     name: Node tests, contracts, and builds
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: services/server/go.mod
           cache-dependency-path: services/server/go.sum
@@ -59,9 +63,10 @@ jobs:
   playwright:
     name: Playwright browser flows
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
@@ -71,16 +76,25 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Run end-to-end tests
         run: npm run test:e2e
+      - name: Upload Playwright diagnostics
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playwright-diagnostics
+          path: output/playwright
+          if-no-files-found: ignore
+          retention-days: 7
 
   capacity-smoke:
     name: Realtime capacity smoke
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: services/server
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: services/server/go.mod
           cache-dependency-path: services/server/go.sum
@@ -114,7 +128,7 @@ jobs:
         run: cat "$RUNNER_TEMP/server.log"
       - name: Upload capacity report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: capacity-smoke-report
           path: ${{ runner.temp }}/capacity-report.json
@@ -126,11 +140,25 @@ jobs:
             kill "$(cat "$RUNNER_TEMP/server.pid")" || true
           fi
 
+  docker-images:
+    name: Docker image (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [server, web, admin]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Build production image
+        run: docker build --file "Dockerfile.${{ matrix.service }}" --tag "royal-flush-${{ matrix.service }}:ci" .
+
   deployment-gate:
     name: Deployment gate
     if: ${{ always() }}
-    needs: [go, node, playwright, capacity-smoke]
+    needs: [go, node, playwright, capacity-smoke, docker-images]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Verify required jobs
         env:
@@ -138,11 +166,17 @@ jobs:
           NODE_RESULT: ${{ needs.node.result }}
           PLAYWRIGHT_RESULT: ${{ needs.playwright.result }}
           CAPACITY_RESULT: ${{ needs['capacity-smoke'].result }}
+          DOCKER_RESULT: ${{ needs['docker-images'].result }}
         run: |
-          for result in "$GO_RESULT" "$NODE_RESULT" "$PLAYWRIGHT_RESULT" "$CAPACITY_RESULT"; do
+          for result in "$GO_RESULT" "$NODE_RESULT" "$PLAYWRIGHT_RESULT" "$CAPACITY_RESULT" "$DOCKER_RESULT"; do
             if test "$result" != "success"; then
               echo "A required CI job did not succeed: $result"
               exit 1
             fi
           done
           echo "All required CI jobs succeeded; this revision is ready for deployment."
+          {
+            echo "## Deployment gate passed"
+            echo
+            echo "Go, Node, browser, capacity, and all three production images are verified."
+          } >> "$GITHUB_STEP_SUMMARY"
