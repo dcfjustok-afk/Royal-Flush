@@ -11,4 +11,4 @@ apps/*/src/**/*.js
 apps/*/vite.config.js
 .DS_Store
 output/playwright/
-.impeccable/review/
+**/.impeccable/review/
