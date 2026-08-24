@@ -203,6 +203,65 @@ func TestRotatingInviteCodeInvalidatesThePreviousCode(t *testing.T) {
 	}
 }
 
+func TestInviteRotationPersistenceFailureKeepsOldCodeAndManagerMapping(t *testing.T) {
+	ctx := context.Background()
+	store := &statefulRoomStore{states: make(map[string]PersistentState)}
+	manager := NewManagerWithStore(score.NewService(nil), store)
+	actor, err := manager.Create(ctx, testConfig(), Identity{ID: "owner", Name: "房主"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(manager.Close)
+	oldCode := actor.Code
+	store.saveErr = errors.New("database unavailable")
+	if _, _, err := actor.Handle(ctx, "owner", ClientCommand{Type: "room.rotate_invite", RequestID: "rotate-fails"}); !errors.Is(err, store.saveErr) {
+		t.Fatalf("rotation error = %v, want persistence failure", err)
+	}
+	if actor.Code != oldCode {
+		t.Fatalf("failed rotation changed actor code from %q to %q", oldCode, actor.Code)
+	}
+	if resolved, ok := manager.Room(oldCode); !ok || resolved != actor {
+		t.Fatal("failed rotation invalidated the working invite code")
+	}
+}
+
+func TestOwnerTransferSideEffectRunsOnlyAfterStatePersistence(t *testing.T) {
+	ctx := context.Background()
+	actor, err := NewActor(testConfig(), Identity{ID: "owner", Name: "房主"}, score.NewService(nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer actor.Close()
+	if _, err := actor.Join(ctx, Identity{ID: "u2", Name: "玩家二"}, 1); err != nil {
+		t.Fatal(err)
+	}
+	persistErr := errors.New("database unavailable")
+	ownerSideEffects := 0
+	actor.onOwnerChanged = func(string) error {
+		ownerSideEffects++
+		return nil
+	}
+	actor.onEvent = func(string, Envelope, PersistentState) error { return persistErr }
+	payload := json.RawMessage(`{"userId":"u2"}`)
+	if _, _, err := actor.Handle(ctx, "owner", ClientCommand{Type: "room.transfer_owner", RequestID: "transfer-fails", Payload: payload}); !errors.Is(err, persistErr) {
+		t.Fatalf("transfer error = %v, want persistence failure", err)
+	}
+	snapshot, err := actor.Snapshot(ctx, "owner")
+	if err != nil || snapshot.OwnerID != "owner" {
+		t.Fatalf("failed transfer changed owner: snapshot=%#v err=%v", snapshot, err)
+	}
+	if ownerSideEffects != 0 {
+		t.Fatalf("owner persistence ran %d times before room state committed", ownerSideEffects)
+	}
+	actor.onEvent = nil
+	if _, _, err := actor.Handle(ctx, "owner", ClientCommand{Type: "room.transfer_owner", RequestID: "transfer-fails", Payload: payload}); err != nil {
+		t.Fatal(err)
+	}
+	if ownerSideEffects != 1 {
+		t.Fatalf("successful transfer side effect count = %d, want 1", ownerSideEffects)
+	}
+}
+
 func TestDisconnectedSeatIsRetainedAndMultipleConnectionsAreCounted(t *testing.T) {
 	ctx := context.Background()
 	actor, err := NewActor(testConfig(), Identity{ID: "u1", Name: "房主"}, score.NewService(nil), nil)
@@ -538,10 +597,14 @@ type recordingRoomStore struct {
 
 type statefulRoomStore struct {
 	recordingRoomStore
-	states map[string]PersistentState
+	states  map[string]PersistentState
+	saveErr error
 }
 
 func (s *statefulRoomStore) SaveRoomState(_ context.Context, state PersistentState) error {
+	if s.saveErr != nil {
+		return s.saveErr
+	}
 	s.states[state.Room.ID] = state
 	return nil
 }

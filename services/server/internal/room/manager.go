@@ -119,10 +119,16 @@ func (m *Manager) configureActor(actor *Actor) {
 		if m.store == nil {
 			return nil
 		}
+		if _, ok := m.store.(StateStore); ok {
+			return nil
+		}
 		return m.store.UpdateRoomOwner(context.Background(), actor.ID, ownerID)
 	}
 	actor.onRoomEnded = func() error {
 		if m.store == nil {
+			return nil
+		}
+		if _, ok := m.store.(StateStore); ok {
 			return nil
 		}
 		return m.store.EndRoom(context.Background(), actor.ID, time.Now().UTC())
@@ -440,8 +446,10 @@ func (m *Manager) updateRoomCode(actor *Actor, oldCode, newCode string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.store != nil {
-		if err := m.store.UpdateRoomCode(context.Background(), actor.ID, oldCode, newCode); err != nil {
-			return err
+		if _, ok := m.store.(StateStore); !ok {
+			if err := m.store.UpdateRoomCode(context.Background(), actor.ID, oldCode, newCode); err != nil {
+				return err
+			}
 		}
 	}
 	if m.byCode[oldCode] == actor {

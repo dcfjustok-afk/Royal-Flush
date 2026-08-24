@@ -465,6 +465,9 @@ func (a *Actor) Handle(ctx context.Context, userID string, command ClientCommand
 			}
 		}
 		a.publishEnvelope(envelope)
+		if a.Code != checkpoint.Room.Code && a.onCodeChanged != nil {
+			_ = a.onCodeChanged(checkpoint.Room.Code, a.Code)
+		}
 		a.finishSettlements(settlements)
 		a.finishRoomMetadata(checkpoint.Room.OwnerID, eventType)
 		return commandResult{Envelope: envelope}, nil
@@ -786,12 +789,6 @@ func (a *Actor) applyCommand(userID string, seat int, command ClientCommand) (an
 		if err != nil {
 			return nil, "", err
 		}
-		oldCode := a.Code
-		if a.onCodeChanged != nil {
-			if err := a.onCodeChanged(oldCode, code); err != nil {
-				return nil, "", err
-			}
-		}
 		a.Code = code
 		return map[string]any{"roomCode": code}, "room.invite_rotated", nil
 	case "room.transfer_owner":
@@ -806,11 +803,6 @@ func (a *Actor) applyCommand(userID string, seat int, command ClientCommand) (an
 		}
 		if a.seatFor(payload.UserID) < 0 {
 			return nil, "", ErrPlayerNotSeated
-		}
-		if a.onOwnerChanged != nil {
-			if err := a.onOwnerChanged(payload.UserID); err != nil {
-				return nil, "", err
-			}
 		}
 		a.OwnerID = payload.UserID
 		return payload, "room.owner_transferred", nil
