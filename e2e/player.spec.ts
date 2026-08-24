@@ -32,6 +32,31 @@ test("玩家可以注册持久账号并进入大厅", async ({ page }, testInfo)
   await expect(page.getByRole("link", { name: "账号：新玩家" })).toBeVisible();
 });
 
+test("跨设备登录会返回仍在等待的房间", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1440", "代表性桌面项目覆盖账号房间恢复");
+  const waiting = structuredClone(playerSnapshot);
+  waiting.street = "waiting";
+  waiting.handNumber = 0;
+  waiting.board = [];
+  waiting.holeCards = [];
+  await page.route("**/api/v1/me", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      user: { id: "me", phone: "13800138000", nickname: "你", permissions: {}, banned: false, createdAt: "2026-08-24T12:00:00Z" },
+      balance: 1860,
+      activeRoomId: "room-saturday",
+    }),
+  }));
+  await page.route("**/api/v1/rooms/room-saturday/snapshot", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(waiting) }));
+
+  await page.goto("/");
+  const resume = page.getByRole("link", { name: /返回等候室/ });
+  await expect(resume).toBeVisible();
+  await expect(resume).toHaveAttribute("href", "/rooms/room-saturday/waiting");
+  await expect(page.locator(".room-signal")).toContainText("等待玩家准备");
+});
+
 test("牌桌在目标视口内保持完整且筹码不会改变布局", async ({ page }) => {
   await page.goto("/rooms/room-saturday/table");
   await expect(page.locator(".table-app")).toBeVisible();

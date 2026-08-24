@@ -27,6 +27,9 @@ async function copyCode() {
 }
 
 const hasActiveRoom = computed(() => Boolean(store.activeRoomId && store.snapshot.roomId));
+const activeRoomRoute = computed(() => store.snapshot.street === "waiting" ? `/rooms/${store.snapshot.roomId}/waiting` : `/rooms/${store.snapshot.roomId}/table`);
+const activeRoomStatus = computed(() => store.snapshot.street === "waiting" ? "等待玩家准备" : store.snapshot.street === "settled" ? "等待下一手" : "牌局进行中");
+const activeRoomAction = computed(() => store.snapshot.street === "waiting" ? "返回等候室" : "返回牌桌");
 
 onMounted(async () => {
   await store.probeBackend();
@@ -45,10 +48,10 @@ onMounted(async () => {
         </div>
 
         <div v-if="hasActiveRoom" class="active-room-band">
-          <div class="room-signal"><VoiceMeter active /><span>牌局进行中</span></div>
+          <div class="room-signal"><VoiceMeter active /><span>{{ activeRoomStatus }}</span></div>
           <div class="active-room-name"><strong>{{ store.snapshot.roomName }}</strong><span>{{ store.snapshot.roomCode }} · 第 {{ store.snapshot.handNumber }} 手牌</span></div>
           <dl class="room-facts"><div><dt>在线</dt><dd><Users />{{ store.activePlayers }} / {{ store.roomConfig.maxPlayers }}</dd></div><div><dt>盲注</dt><dd>{{ store.roomConfig.blindPreset }}</dd></div><div><dt>桌内语音</dt><dd><Headphones />{{ store.roomConfig.voiceEnabled ? "已开启" : "未开启" }}</dd></div></dl>
-          <div class="room-band-actions"><button class="icon-button" type="button" title="复制房间码" aria-label="复制房间码" @click="copyCode"><Copy /></button><RouterLink class="button light" :to="`/rooms/${store.snapshot.roomId}/table`">返回牌桌<ArrowRight /></RouterLink></div>
+          <div class="room-band-actions"><button class="icon-button" type="button" title="复制房间码" aria-label="复制房间码" @click="copyCode"><Copy /></button><RouterLink class="button light" :to="activeRoomRoute">{{ activeRoomAction }}<ArrowRight /></RouterLink></div>
         </div>
         <div v-else class="active-room-band"><div class="active-room-name"><strong>当前没有进行中的牌局</strong><span>创建房间或使用好友发来的房间码加入</span></div></div>
       </section>
