@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { api, isSessionRevokedClose } from "./api";
+import { api, isSessionRevokedClose, isVoiceConnectionReplacedClose } from "./api";
 
 describe("player API", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -24,5 +24,10 @@ describe("player API", () => {
     expect(isSessionRevokedClose(1008)).toBe(true);
     expect(isSessionRevokedClose(1000)).toBe(false);
     expect(isSessionRevokedClose(1006)).toBe(false);
+  });
+
+  it("recognizes a voice connection replaced by another tab", () => {
+    expect(isVoiceConnectionReplacedClose(4001)).toBe(true);
+    expect(isVoiceConnectionReplacedClose(1000)).toBe(false);
   });
 });

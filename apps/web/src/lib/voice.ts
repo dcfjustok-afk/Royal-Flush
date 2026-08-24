@@ -1,5 +1,5 @@
 import type { Room as LiveKitRoom } from "livekit-client";
-import { api, isSessionRevokedClose, type VoiceToken } from "./api";
+import { api, isSessionRevokedClose, isVoiceConnectionReplacedClose, type VoiceToken } from "./api";
 
 export type VoiceTransport = "livekit" | "webrtc";
 
@@ -153,6 +153,11 @@ class MeshVoiceSession {
       if (isSessionRevokedClose(event.code)) {
         this.shouldReconnect = false;
         this.handlers.error("登录状态已失效，请重新登录");
+        return;
+      }
+      if (isVoiceConnectionReplacedClose(event.code)) {
+        this.shouldReconnect = false;
+        this.handlers.error("语音已在另一个标签页开启");
         return;
       }
       if (!this.shouldReconnect) return;

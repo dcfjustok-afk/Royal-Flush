@@ -513,6 +513,24 @@ func TestVoiceWebSocketRelaysSignalsBetweenSeatedUsers(t *testing.T) {
 	if err := wsjson.Read(ctx, second, &event); err != nil || event.Type != "voice.signal" || event.FromUserID != "voice-u1" || event.SignalType != "voice.description" {
 		t.Fatalf("relayed signal = %#v, err = %v", event, err)
 	}
+
+	replacement, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{HTTPHeader: http.Header{"X-User-ID": []string{"voice-u1"}, "X-User-Name": []string{"玩家一"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replacement.Close(websocket.StatusNormalClosure, "test complete")
+	if err := wsjson.Read(ctx, replacement, &event); err != nil || event.Type != "voice.peers" || len(event.Peers) != 1 || event.Peers[0].UserID != "voice-u2" {
+		t.Fatalf("replacement peer list = %#v, err = %v", event, err)
+	}
+	if err := wsjson.Read(ctx, first, &event); websocket.CloseStatus(err) != voiceConnectionReplaced {
+		t.Fatalf("previous same-user voice connection was not replaced: %v", err)
+	}
+	if err := wsjson.Write(ctx, replacement, description); err != nil {
+		t.Fatal(err)
+	}
+	if err := wsjson.Read(ctx, second, &event); err != nil || event.Type != "voice.signal" || event.FromUserID != "voice-u1" {
+		t.Fatalf("replacement signal = %#v, err = %v", event, err)
+	}
 }
 
 func TestLogoutImmediatelyRevokesAllRealtimeConnections(t *testing.T) {
