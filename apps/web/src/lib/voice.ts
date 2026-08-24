@@ -1,5 +1,5 @@
 import type { Room as LiveKitRoom } from "livekit-client";
-import { api, type VoiceToken } from "./api";
+import { api, isRoomMembershipRevokedClose, isSessionRevokedClose, isVoiceConnectionReplacedClose, type VoiceToken } from "./api";
 
 export type VoiceTransport = "livekit" | "webrtc";
 
@@ -145,11 +145,26 @@ class MeshVoiceSession {
         .then(() => this.handleEvent(JSON.parse(String(message.data)) as VoiceServerEvent))
         .catch((reason) => this.handlers.error(microphoneError(reason)));
     });
-    socket.addEventListener("close", () => {
+    socket.addEventListener("close", (event) => {
       if (this.socket !== socket) return;
       this.socket = null;
       this.handlers.connected(false);
       for (const userId of [...this.peers.keys()]) this.removePeer(userId);
+      if (isSessionRevokedClose(event.code)) {
+        this.shouldReconnect = false;
+        this.handlers.error("登录状态已失效，请重新登录");
+        return;
+      }
+      if (isVoiceConnectionReplacedClose(event.code)) {
+        this.shouldReconnect = false;
+        this.handlers.error("语音已在另一个标签页开启");
+        return;
+      }
+      if (isRoomMembershipRevokedClose(event.code)) {
+        this.shouldReconnect = false;
+        this.handlers.error("你已离开或被移出这个房间");
+        return;
+      }
       if (!this.shouldReconnect) return;
       const delay = Math.min(500 * 2 ** this.reconnectAttempt++, 5000);
       this.reconnectTimer = window.setTimeout(() => this.openSocket(), delay);

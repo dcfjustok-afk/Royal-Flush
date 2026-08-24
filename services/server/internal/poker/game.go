@@ -206,7 +206,7 @@ func (g *Game) StartHand() error {
 			player.Away = true
 		}
 	}
-	g.Button = g.nextSeat(g.Button, func(player *Player) bool { return player != nil && !player.Away && player.Stack > 0 })
+	g.Button = g.nextSeat(g.Button, g.available)
 	active := g.activeSeats()
 	if len(active) == 2 {
 		g.SmallBlindSeat = g.Button
@@ -273,6 +273,14 @@ func (g *Game) CanRaise(seat int) bool {
 	return !acted || g.CurrentBet-last >= g.MinimumRaiseBy
 }
 
+func (g *Game) CanAllIn(seat int) bool {
+	player := g.player(seat)
+	if player == nil || seat != g.Actor || !g.canAct(player) || player.Stack <= 0 {
+		return false
+	}
+	return player.Stack <= g.ToCall(seat) || g.CanRaise(seat)
+}
+
 func (g *Game) CheckOrCall(seat int) error {
 	player, err := g.requireActor(seat)
 	if err != nil {
@@ -325,7 +333,7 @@ func (g *Game) AllIn(seat int) error {
 	if err != nil {
 		return err
 	}
-	if player.Stack <= 0 {
+	if !g.CanAllIn(seat) {
 		return ErrIllegalAction
 	}
 	newTotal := player.StreetCommitted + player.Stack
@@ -507,7 +515,7 @@ func (g *Game) showdown() error {
 func (g *Game) finishByFold() {
 	winner := -1
 	for seat, player := range g.Seats {
-		if player != nil && !player.Folded && player.HandCommitted >= 0 && !player.Away {
+		if player != nil && !player.Folded && !player.Away && len(player.Hole) == 2 {
 			winner = seat
 			break
 		}
@@ -525,8 +533,12 @@ func (g *Game) finishHand() {
 	g.Actor = -1
 	g.pending = make(map[int]bool)
 	for _, player := range g.Seats {
-		if player != nil && player.Stack == 0 {
-			player.Away = true
+		if player != nil {
+			player.StreetCommitted = 0
+			player.HandCommitted = 0
+			if player.Stack == 0 {
+				player.Away = true
+			}
 		}
 	}
 	g.Version++
@@ -574,7 +586,7 @@ func (g *Game) requireActor(seat int) (*Player, error) {
 }
 
 func (g *Game) available(player *Player) bool {
-	return player != nil && !player.Away && !player.Leaving && player.Stack > 0
+	return player != nil && player.Ready && !player.Away && !player.Disconnected && !player.Leaving && player.Stack > 0
 }
 
 func (g *Game) canAct(player *Player) bool {

@@ -15,19 +15,26 @@ var (
 )
 
 type Manager struct {
-	mu          sync.RWMutex
-	scores      AccountScores
-	store       Store
-	lease       Lease
-	instanceID  string
-	leaseTTL    time.Duration
-	leaseRenew  time.Duration
-	leaseStops  map[string]chan struct{}
-	rooms       map[string]*Actor
-	byCode      map[string]*Actor
-	activeSeat  map[string]string
-	emptyTimers map[string]*time.Timer
-	emptyWait   time.Duration
+	mu             sync.RWMutex
+	scores         AccountScores
+	store          Store
+	lease          Lease
+	instanceID     string
+	leaseTTL       time.Duration
+	leaseRenew     time.Duration
+	leaseStops     map[string]chan struct{}
+	rooms          map[string]*Actor
+	byCode         map[string]*Actor
+	activeSeat     map[string]string
+	emptyTimers    map[string]*time.Timer
+	emptyWait      time.Duration
+	onSeatReleased func(string)
+}
+
+func (m *Manager) SetSeatReleasedHook(hook func(string)) {
+	m.mu.Lock()
+	m.onSeatReleased = hook
+	m.mu.Unlock()
 }
 
 func NewManager(scores AccountScores) *Manager {
@@ -327,7 +334,11 @@ func (m *Manager) releaseSeat(userID string) {
 		actor := m.rooms[roomID]
 		m.emptyTimers[roomID] = time.AfterFunc(m.emptyWait, func() { m.expireEmptyRoom(roomID, actor) })
 	}
+	hook := m.onSeatReleased
 	m.mu.Unlock()
+	if hook != nil {
+		hook(userID)
+	}
 }
 
 func (m *Manager) hasActiveSeatLocked(roomID string) bool {

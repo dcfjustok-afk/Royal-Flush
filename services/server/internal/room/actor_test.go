@@ -82,6 +82,33 @@ func TestHandStartedEventNeverBroadcastsPrivateCards(t *testing.T) {
 	}
 }
 
+func TestGameStartRequiresTwoConnectedReadyPlayers(t *testing.T) {
+	ctx := context.Background()
+	actor, err := NewActor(testConfig(), Identity{ID: "owner", Name: "房主"}, score.NewService(nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer actor.Close()
+	if _, err := actor.Join(ctx, Identity{ID: "offline", Name: "断线玩家"}, 1); err != nil {
+		t.Fatal(err)
+	}
+	ready := json.RawMessage(`{"ready":true}`)
+	for _, userID := range []string{"owner", "offline"} {
+		if _, _, err := actor.Handle(ctx, userID, ClientCommand{Type: "room.ready", RequestID: "ready-" + userID, Payload: ready}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := actor.PlayerConnected(ctx, "offline"); err != nil {
+		t.Fatal(err)
+	}
+	if err := actor.PlayerDisconnected(ctx, "offline"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := actor.Handle(ctx, "owner", ClientCommand{Type: "game.start", RequestID: "start"}); !errors.Is(err, ErrPlayersNotReady) {
+		t.Fatalf("expected disconnected ready player to be excluded, got %v", err)
+	}
+}
+
 func TestRoomOwnerControlsAndAutomaticTransferUseJoinOrder(t *testing.T) {
 	ctx := context.Background()
 	manager := NewManager(score.NewService(nil))
@@ -120,6 +147,39 @@ func TestRoomOwnerControlsAndAutomaticTransferUseJoinOrder(t *testing.T) {
 	}
 	if snapshot.OwnerID != "early" {
 		t.Fatalf("owner transferred by seat order instead of join order: %s", snapshot.OwnerID)
+	}
+}
+
+func TestUpdatingIdentitySynchronizesRoomSnapshotAndEvent(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	actor, err := NewActor(testConfig(), Identity{ID: "owner", Name: "旧昵称"}, score.NewService(nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer actor.Close()
+	events, unsubscribe, err := actor.Subscribe(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unsubscribe()
+	if err := actor.UpdateIdentity(ctx, Identity{ID: "owner", Name: "新昵称"}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := actor.Snapshot(ctx, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if localPlayer(snapshot).Name != "新昵称" {
+		t.Fatalf("room snapshot kept stale nickname: %#v", snapshot.Players)
+	}
+	select {
+	case event := <-events:
+		if event.Type != "room.player_profile_updated" {
+			t.Fatalf("unexpected profile event: %#v", event)
+		}
+	case <-ctx.Done():
+		t.Fatal("profile update event was not published")
 	}
 }
 
@@ -509,6 +569,67 @@ func TestRaiseValidationVersionAndIdempotency(t *testing.T) {
 	_, _, err = actor.Handle(ctx, actorID, ClientCommand{Type: "action.fold", RequestID: "stale", ExpectedVersion: snapshot.Version})
 	if !errors.Is(err, ErrVersionConflict) {
 		t.Fatalf("expected version conflict, got %v", err)
+	}
+}
+
+func TestRoomActivityDoesNotPostponeTheActionDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	actor, err := NewActor(testConfig(), Identity{ID: "u1", Name: "房主"}, score.NewService(nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer actor.Close()
+	if _, err := actor.Join(ctx, Identity{ID: "u2", Name: "玩家二"}, 1); err != nil {
+		t.Fatal(err)
+	}
+	ready := json.RawMessage(`{"ready":true}`)
+	for _, userID := range []string{"u1", "u2"} {
+		if _, _, err := actor.Handle(ctx, userID, ClientCommand{Type: "room.ready", RequestID: "ready-" + userID, Payload: ready}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := actor.Handle(ctx, "u1", ClientCommand{Type: "game.start", RequestID: "start"}); err != nil {
+		t.Fatal(err)
+	}
+	events, unsubscribe, err := actor.Subscribe(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unsubscribe()
+	if _, err := actor.call(ctx, func() (any, error) {
+		actor.scheduleActionTimeoutAt(time.Now().Add(40 * time.Millisecond))
+		return nil, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := actor.Snapshot(ctx, "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nonActor := "u1"
+	if localPlayer(snapshot).IsCurrentActor {
+		nonActor = "u2"
+	}
+	if err := actor.PlayerConnected(ctx, nonActor); err != nil {
+		t.Fatal(err)
+	}
+	if err := actor.PlayerDisconnected(ctx, nonActor); err != nil {
+		t.Fatal(err)
+	}
+	message := json.RawMessage(`{"message":"好牌"}`)
+	if _, _, err := actor.Handle(ctx, nonActor, ClientCommand{Type: "room.quick_message", RequestID: "message", Payload: message}); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		select {
+		case event := <-events:
+			if event.Type == "game.action_timed_out" {
+				return
+			}
+		case <-ctx.Done():
+			t.Fatal("room activity postponed the action timeout")
+		}
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/go-chi/chi/v5"
 	"github.com/royal-flush/royal-flush/services/server/internal/auth"
 	"github.com/royal-flush/royal-flush/services/server/internal/operations"
@@ -104,9 +105,13 @@ func (s *Server) login(writer http.ResponseWriter, request *http.Request) {
 
 func (s *Server) logout(writer http.ResponseWriter, request *http.Request) {
 	if cookie, err := request.Cookie("rf_session"); err == nil {
+		user, authenticated, _ := s.auth.UserBySession(request.Context(), cookie.Value)
 		if err := s.auth.Logout(request.Context(), cookie.Value); err != nil {
 			writeProblem(writer, http.StatusServiceUnavailable, "session_store_unavailable", "暂时无法退出登录")
 			return
+		}
+		if authenticated {
+			s.realtime.disconnectUser(user.ID, websocket.StatusPolicyViolation, "account session revoked")
 		}
 	}
 	http.SetCookie(writer, &http.Cookie{
@@ -161,7 +166,16 @@ func (s *Server) updateMe(writer http.ResponseWriter, request *http.Request) {
 		writeProblem(writer, http.StatusServiceUnavailable, "identity_store_unavailable", "用户资料暂时无法保存")
 		return
 	}
-	writeJSON(writer, http.StatusOK, map[string]any{"user": user, "balance": s.scores.Balance(user.ID), "activeRoomId": s.rooms.ActiveRoom(user.ID)})
+	activeRoomID := s.rooms.ActiveRoom(user.ID)
+	if activeRoomID != "" {
+		if actor, ok := s.rooms.Room(activeRoomID); ok {
+			if err := actor.UpdateIdentity(request.Context(), room.Identity{ID: user.ID, Name: user.Nickname}); err != nil {
+				writeProblem(writer, http.StatusServiceUnavailable, "room_profile_unavailable", "昵称已保存，但暂时无法同步到当前房间")
+				return
+			}
+		}
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"user": user, "balance": s.scores.Balance(user.ID), "activeRoomId": activeRoomID})
 }
 
 func (s *Server) persistIdentity(request *http.Request, user auth.User) error {
@@ -249,11 +263,25 @@ func (s *Server) publicRoom(writer http.ResponseWriter, request *http.Request) {
 		writeDomainError(writer, err)
 		return
 	}
+	if snapshot.Ended {
+		writeProblem(writer, http.StatusNotFound, "room_not_found", "房间不存在或已结束")
+		return
+	}
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"id": snapshot.RoomID, "code": snapshot.RoomCode, "name": snapshot.RoomName,
-		"ownerId": snapshot.OwnerID, "ownerName": ownerName(snapshot), "onlinePlayers": len(snapshot.Players), "maxPlayers": snapshot.Config.MaxPlayers,
+		"ownerId": snapshot.OwnerID, "ownerName": ownerName(snapshot), "onlinePlayers": onlinePlayerCount(snapshot.Players), "maxPlayers": snapshot.Config.MaxPlayers,
 		"config": snapshot.Config, "occupiedSeats": occupiedSeats(snapshot.Players),
 	})
+}
+
+func onlinePlayerCount(players []room.PlayerSnapshot) int {
+	count := 0
+	for _, player := range players {
+		if player.Status != "disconnected" {
+			count++
+		}
+	}
+	return count
 }
 
 func ownerName(snapshot room.TableSnapshot) string {
@@ -303,6 +331,7 @@ func (s *Server) roomCommand(writer http.ResponseWriter, request *http.Request) 
 		writeDomainError(writer, err)
 		return
 	}
+	s.disconnectDepartedUsers(event)
 	writeJSON(writer, http.StatusOK, map[string]any{"event": event, "duplicate": duplicate})
 }
 

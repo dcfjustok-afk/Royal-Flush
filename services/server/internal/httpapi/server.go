@@ -45,6 +45,7 @@ type Server struct {
 	rooms    *room.Manager
 	ops      operations.Store
 	voiceHub *voiceHub
+	realtime *realtimeConnections
 	router   http.Handler
 }
 
@@ -62,8 +63,11 @@ func New(config Config, logger *slog.Logger) *Server {
 	if operationsStore == nil {
 		operationsStore = operations.NewMemoryStore()
 	}
-	server := &Server{config: config, log: logger, auth: authService, scores: scoreService, ops: operationsStore, voiceHub: newVoiceHub()}
+	server := &Server{config: config, log: logger, auth: authService, scores: scoreService, ops: operationsStore, voiceHub: newVoiceHub(), realtime: newRealtimeConnections()}
 	server.rooms = room.NewManagerWithInfrastructure(scoreService, config.RoomStore, config.RoomLease, config.InstanceID)
+	server.rooms.SetSeatReleasedHook(func(userID string) {
+		server.realtime.disconnectUser(userID, roomMembershipRevoked, "room membership revoked")
+	})
 	server.router = server.routes()
 	return server
 }
@@ -246,6 +250,8 @@ func writeDomainError(writer http.ResponseWriter, err error) {
 	status := http.StatusBadRequest
 	code := "invalid_request"
 	switch {
+	case errors.Is(err, room.ErrRoomClosed):
+		status, code = http.StatusGone, "room_closed"
 	case errors.Is(err, room.ErrForbidden):
 		status, code = http.StatusForbidden, "forbidden"
 	case errors.Is(err, room.ErrCannotRemoveOwner):

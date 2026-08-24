@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/go-chi/chi/v5"
 	"github.com/royal-flush/royal-flush/services/server/internal/auth"
 	"github.com/royal-flush/royal-flush/services/server/internal/operations"
@@ -103,6 +104,9 @@ func (s *Server) adminSetUserBanned(writer http.ResponseWriter, request *http.Re
 	if err != nil {
 		writeDomainError(writer, err)
 		return
+	}
+	if input.Banned {
+		s.realtime.disconnectUser(userID, websocket.StatusPolicyViolation, "account session revoked")
 	}
 	if err := s.auth.SetBanned(request.Context(), userID, input.Banned); err != nil && !errors.Is(err, auth.ErrUserNotFound) {
 		writeProblem(writer, http.StatusServiceUnavailable, "identity_store_unavailable", "用户状态暂时无法同步")

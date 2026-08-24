@@ -66,6 +66,7 @@ export interface RoomEvent {
     | "room.player_joined"
     | "room.player_disconnected"
     | "room.player_reconnected"
+    | "room.player_profile_updated"
     | "room.ready_changed"
     | "room.player_leaving"
     | "room.player_removed"

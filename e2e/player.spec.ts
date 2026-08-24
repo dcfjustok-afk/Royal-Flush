@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { mockPlayerApi } from "./support/api-mocks";
+import { mockPlayerApi, playerSnapshot } from "./support/api-mocks";
 
 async function expectInsideViewport(locator: Locator, page: Page) {
   const box = await locator.boundingBox();
@@ -30,6 +30,48 @@ test("玩家可以注册持久账号并进入大厅", async ({ page }, testInfo)
   await page.getByRole("button", { name: /注册并登录/ }).click();
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByRole("link", { name: "账号：新玩家" })).toBeVisible();
+});
+
+test("跨设备登录会返回仍在等待的房间", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1440", "代表性桌面项目覆盖账号房间恢复");
+  const waiting = structuredClone(playerSnapshot);
+  waiting.street = "waiting";
+  waiting.handNumber = 0;
+  waiting.board = [];
+  waiting.holeCards = [];
+  await page.route("**/api/v1/me", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      user: { id: "me", phone: "13800138000", nickname: "你", permissions: {}, banned: false, createdAt: "2026-08-24T12:00:00Z" },
+      balance: 1860,
+      activeRoomId: "room-saturday",
+    }),
+  }));
+  await page.route("**/api/v1/rooms/room-saturday/snapshot", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(waiting) }));
+
+  await page.goto("/");
+  const resume = page.getByRole("link", { name: /返回等候室/ });
+  await expect(resume).toBeVisible();
+  await expect(resume).toHaveAttribute("href", "/rooms/room-saturday/waiting");
+  await expect(page.locator(".room-signal")).toContainText("等待玩家准备");
+});
+
+test("断线的已准备玩家不会让房主误开局", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1440", "代表性桌面项目覆盖多人准备状态");
+  const waiting = structuredClone(playerSnapshot);
+  waiting.street = "waiting";
+  if (!waiting.config) throw new Error("player fixture is missing room config");
+  waiting.config.maxPlayers = 2;
+  waiting.players = [
+    { ...waiting.players.find((player) => player.id === "me")!, isReady: true, isCurrentActor: false },
+    { ...waiting.players.find((player) => player.id === "p1")!, isReady: true, status: "disconnected", isCurrentActor: false },
+  ];
+  await page.route("**/api/v1/rooms/room-saturday/snapshot", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(waiting) }));
+
+  await page.goto("/rooms/room-saturday/waiting");
+  await expect(page.getByText("1 人已准备")).toBeVisible();
+  await expect(page.getByRole("button", { name: "等待至少两人准备" })).toBeDisabled();
 });
 
 test("牌桌在目标视口内保持完整且筹码不会改变布局", async ({ page }) => {
@@ -91,6 +133,29 @@ test("桌内举报可通过设置面板完整提交", async ({ page }, testInfo)
   await page.getByLabel("问题说明").fill("语音持续出现干扰");
   await page.getByRole("button", { name: "提交举报" }).click();
   await expect(page.locator(".report-feedback.success")).toContainText("举报已登记");
+});
+
+test("房主可以在结算后开始下一手", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1440", "代表性桌面项目覆盖多人续局工作流");
+  const settled = structuredClone(playerSnapshot);
+  settled.street = "settled";
+  settled.actionDeadline = "";
+  settled.players.forEach((player) => (player.isCurrentActor = false));
+
+  await page.route("**/api/v1/rooms/room-saturday/snapshot", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(settled) }));
+  await page.route("**/api/v1/rooms/room-saturday/commands", async (route) => {
+    const command = route.request().postDataJSON() as { type: string };
+    expect(command.type).toBe("game.start");
+    settled.street = "preflop";
+    settled.handNumber++;
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ duplicate: false, event: { type: "game.hand_started" } }) });
+  });
+
+  await page.goto("/rooms/room-saturday/table");
+  await expect(page.getByRole("button", { name: "开始下一手" })).toBeVisible();
+  await page.getByRole("button", { name: "开始下一手" }).click();
+  await expect(page.getByRole("button", { name: "开始下一手" })).toHaveCount(0);
+  await expect(page.locator(".table-telemetry")).toContainText("029");
 });
 
 test("牌桌建立视觉回归基线", async ({ page }) => {

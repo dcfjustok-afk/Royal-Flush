@@ -14,6 +14,8 @@ import (
 )
 
 const maxVoiceSignalBytes = 64 << 10
+const voiceConnectionReplaced websocket.StatusCode = 4001
+const voiceSignalQueueSize = 256
 
 type voicePeer struct {
 	UserID   string `json:"userId"`
@@ -38,9 +40,10 @@ type voiceServerEvent struct {
 }
 
 type voiceClient struct {
-	roomID string
-	user   auth.User
-	send   chan voiceServerEvent
+	roomID     string
+	user       auth.User
+	connection *websocket.Conn
+	send       chan voiceServerEvent
 }
 
 type voiceHub struct {
@@ -52,7 +55,7 @@ func newVoiceHub() *voiceHub {
 	return &voiceHub{rooms: map[string]map[string]map[*voiceClient]struct{}{}}
 }
 
-func (h *voiceHub) join(client *voiceClient) []voicePeer {
+func (h *voiceHub) join(client *voiceClient) ([]voicePeer, []*voiceClient) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	roomClients := h.rooms[client.roomID]
@@ -72,15 +75,16 @@ func (h *voiceHub) join(client *voiceClient) []voicePeer {
 	}
 	connections := roomClients[client.user.ID]
 	firstConnection := len(connections) == 0
-	if connections == nil {
-		connections = map[*voiceClient]struct{}{}
-		roomClients[client.user.ID] = connections
+	replaced := make([]*voiceClient, 0, len(connections))
+	for existing := range connections {
+		replaced = append(replaced, existing)
 	}
-	connections[client] = struct{}{}
+	connections = map[*voiceClient]struct{}{client: {}}
+	roomClients[client.user.ID] = connections
 	if firstConnection {
 		h.broadcastLocked(client.roomID, client.user.ID, voiceServerEvent{Type: "voice.peer_joined", UserID: client.user.ID, Nickname: client.user.Nickname})
 	}
-	return peers
+	return peers, replaced
 }
 
 func (h *voiceHub) leave(client *voiceClient) {
@@ -88,6 +92,9 @@ func (h *voiceHub) leave(client *voiceClient) {
 	defer h.mu.Unlock()
 	roomClients := h.rooms[client.roomID]
 	connections := roomClients[client.user.ID]
+	if _, current := connections[client]; !current {
+		return
+	}
 	delete(connections, client)
 	if len(connections) > 0 {
 		return
@@ -107,13 +114,15 @@ func (h *voiceHub) relay(client *voiceClient, message voiceClientMessage) bool {
 		return false
 	}
 	event := voiceServerEvent{Type: "voice.signal", FromUserID: client.user.ID, SignalType: message.Type, Payload: message.Payload}
+	delivered := false
 	for target := range targets {
 		select {
 		case target.send <- event:
+			delivered = true
 		default:
 		}
 	}
-	return true
+	return delivered
 }
 
 func (h *voiceHub) broadcastLocked(roomID, exceptUserID string, event voiceServerEvent) {
@@ -154,9 +163,17 @@ func (s *Server) voiceEvents(writer http.ResponseWriter, request *http.Request) 
 	connection.SetReadLimit(maxVoiceSignalBytes)
 	ctx, cancel := context.WithCancel(request.Context())
 	defer cancel()
-	client := &voiceClient{roomID: actor.ID, user: user, send: make(chan voiceServerEvent, 32)}
-	peers := s.voiceHub.join(client)
+	unregister := s.realtime.add(user.ID, connection)
+	defer unregister()
+	client := &voiceClient{roomID: actor.ID, user: user, connection: connection, send: make(chan voiceServerEvent, voiceSignalQueueSize)}
+	peers, replaced := s.voiceHub.join(client)
 	defer s.voiceHub.leave(client)
+	for _, previous := range replaced {
+		previous := previous
+		go func() {
+			_ = previous.connection.Close(voiceConnectionReplaced, "voice opened in another tab")
+		}()
+	}
 	if err := wsjson.Write(ctx, connection, voiceServerEvent{Type: "voice.peers", Peers: peers}); err != nil {
 		return
 	}

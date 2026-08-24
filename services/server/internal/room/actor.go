@@ -116,8 +116,8 @@ type actorResponse struct {
 }
 
 type timeoutSignal struct {
-	version int64
-	seat    int
+	generation int64
+	seat       int
 }
 
 type disconnectSignal struct {
@@ -141,6 +141,7 @@ type Actor struct {
 	messages       []SystemMessage
 	version        int64
 	deadline       time.Time
+	actionGen      int64
 	ended          bool
 	processed      map[string]Envelope
 	subscribers    map[chan Envelope]struct{}
@@ -347,12 +348,13 @@ func (a *Actor) Handle(ctx context.Context, userID string, command ClientCommand
 		if strings.HasPrefix(command.Type, "action.") && command.ExpectedVersion != a.version {
 			return nil, ErrVersionConflict
 		}
+		gameVersion := a.game.Version
 		payload, eventType, err := a.applyCommand(userID, seat, command)
 		if err != nil {
 			return nil, err
 		}
 		a.version++
-		if a.game.InHand() && a.game.Actor >= 0 {
+		if a.game.InHand() && a.game.Actor >= 0 && a.game.Version != gameVersion {
 			a.scheduleActionTimeout()
 		}
 		envelope := a.makeEnvelope(eventType, command.RequestID, payload)
@@ -443,6 +445,36 @@ func (a *Actor) PlayerDisconnected(ctx context.Context, userID string) error {
 	return err
 }
 
+func (a *Actor) UpdateIdentity(ctx context.Context, identity Identity) error {
+	_, err := a.call(ctx, func() (any, error) {
+		seat := a.seatFor(identity.ID)
+		if seat < 0 {
+			return nil, ErrPlayerNotSeated
+		}
+		if identity.Name == "" {
+			return nil, errors.New("player name is required")
+		}
+		previousIdentity := a.identities[identity.ID]
+		previousName := a.game.Seats[seat].Name
+		previousVersion := a.version
+		a.identities[identity.ID] = identity
+		a.game.Seats[seat].Name = identity.Name
+		a.version++
+		envelope := a.makeEnvelope("room.player_profile_updated", "", map[string]any{"userId": identity.ID, "name": identity.Name})
+		if a.onEvent != nil {
+			if err := a.onEvent(identity.ID, envelope, a.persistentState()); err != nil {
+				a.identities[identity.ID] = previousIdentity
+				a.game.Seats[seat].Name = previousName
+				a.version = previousVersion
+				return nil, err
+			}
+		}
+		a.publishEnvelope(envelope)
+		return nil, nil
+	})
+	return err
+}
+
 func (a *Actor) BroadcastScoreAddition(ctx context.Context, userID, requestID string, amount, balance int64) error {
 	_, err := a.call(ctx, func() (any, error) {
 		key := "score-addition\x00" + userID + "\x00" + requestID
@@ -492,7 +524,7 @@ func (a *Actor) applyCommand(userID string, seat int, command ClientCommand) (an
 		}
 		ready := 0
 		for _, participant := range a.game.Seats {
-			if participant != nil && participant.Ready && !participant.Leaving {
+			if participant != nil && participant.Ready && !participant.Away && !participant.Disconnected && !participant.Leaving && participant.Stack > 0 {
 				ready++
 			}
 		}
@@ -652,9 +684,13 @@ func (a *Actor) applyCommand(userID string, seat int, command ClientCommand) (an
 				return nil, "", err
 			}
 		}
+		userIDs := make([]string, 0, len(a.identities))
+		for userID := range a.identities {
+			userIDs = append(userIDs, userID)
+		}
 		a.ended = true
 		a.settleAll()
-		return map[string]any{"ended": true}, "room.ended", nil
+		return map[string]any{"ended": true, "userIds": userIDs}, "room.ended", nil
 	default:
 		return nil, "", fmt.Errorf("unsupported command %q", command.Type)
 	}
@@ -696,7 +732,7 @@ func (a *Actor) snapshot(userID string) TableSnapshot {
 			canCheck = toCall == 0
 			canCall = true
 			canRaise = a.game.CanRaise(localSeat)
-			canAllIn = player.Stack > 0
+			canAllIn = a.game.CanAllIn(localSeat)
 		}
 	}
 	return TableSnapshot{
@@ -756,7 +792,8 @@ func (a *Actor) scheduleActionTimeoutAt(deadline time.Time) {
 		deadline = time.Now().UTC()
 	}
 	a.deadline = deadline
-	signal := timeoutSignal{version: a.version, seat: a.game.Actor}
+	a.actionGen++
+	signal := timeoutSignal{generation: a.actionGen, seat: a.game.Actor}
 	delay := time.Until(deadline)
 	if delay < 0 {
 		delay = 0
@@ -780,7 +817,7 @@ func (a *Actor) scheduleDisconnectTimeout(userID string) {
 }
 
 func (a *Actor) handleTimeout(signal timeoutSignal) {
-	if a.ended || !a.game.InHand() || signal.version != a.version || signal.seat != a.game.Actor {
+	if a.ended || !a.game.InHand() || signal.generation != a.actionGen || signal.seat != a.game.Actor {
 		return
 	}
 	toCall := a.game.ToCall(signal.seat)
