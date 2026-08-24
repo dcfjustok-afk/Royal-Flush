@@ -440,6 +440,27 @@ func TestAccountRegistrationSessionProfileAndLogout(t *testing.T) {
 		t.Fatalf("updated nickname = %q", profile.User.Nickname)
 	}
 
+	roomBody := map[string]any{
+		"name": "昵称同步桌", "maxPlayers": 2, "blindPreset": "5/10", "actionSeconds": 20,
+		"voiceEnabled": false, "chipDenominations": []int{5, 10, 20, 50, 100},
+	}
+	response = request(t, client, http.MethodPost, server.URL+"/api/v1/rooms", roomBody, map[string]string{"Cookie": session.String()})
+	var created struct {
+		ID string `json:"id"`
+	}
+	decodeResponse(t, response, &created)
+	response = request(t, client, http.MethodPatch, server.URL+"/api/v1/me", map[string]any{"nickname": "房间新昵称"}, map[string]string{"Cookie": session.String()})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("update seated profile status = %d: %s", response.StatusCode, readBody(response))
+	}
+	response.Body.Close()
+	response = request(t, client, http.MethodGet, server.URL+"/api/v1/rooms/"+created.ID+"/snapshot", nil, map[string]string{"Cookie": session.String()})
+	var seated room.TableSnapshot
+	decodeResponse(t, response, &seated)
+	if len(seated.Players) != 1 || seated.Players[0].Name != "房间新昵称" {
+		t.Fatalf("seated nickname was not synchronized: %#v", seated.Players)
+	}
+
 	response = request(t, client, http.MethodPost, server.URL+"/api/v1/auth/logout", nil, map[string]string{"Cookie": session.String()})
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("logout status = %d", response.StatusCode)

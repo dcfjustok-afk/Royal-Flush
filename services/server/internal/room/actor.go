@@ -443,6 +443,36 @@ func (a *Actor) PlayerDisconnected(ctx context.Context, userID string) error {
 	return err
 }
 
+func (a *Actor) UpdateIdentity(ctx context.Context, identity Identity) error {
+	_, err := a.call(ctx, func() (any, error) {
+		seat := a.seatFor(identity.ID)
+		if seat < 0 {
+			return nil, ErrPlayerNotSeated
+		}
+		if identity.Name == "" {
+			return nil, errors.New("player name is required")
+		}
+		previousIdentity := a.identities[identity.ID]
+		previousName := a.game.Seats[seat].Name
+		previousVersion := a.version
+		a.identities[identity.ID] = identity
+		a.game.Seats[seat].Name = identity.Name
+		a.version++
+		envelope := a.makeEnvelope("room.player_profile_updated", "", map[string]any{"userId": identity.ID, "name": identity.Name})
+		if a.onEvent != nil {
+			if err := a.onEvent(identity.ID, envelope, a.persistentState()); err != nil {
+				a.identities[identity.ID] = previousIdentity
+				a.game.Seats[seat].Name = previousName
+				a.version = previousVersion
+				return nil, err
+			}
+		}
+		a.publishEnvelope(envelope)
+		return nil, nil
+	})
+	return err
+}
+
 func (a *Actor) BroadcastScoreAddition(ctx context.Context, userID, requestID string, amount, balance int64) error {
 	_, err := a.call(ctx, func() (any, error) {
 		key := "score-addition\x00" + userID + "\x00" + requestID

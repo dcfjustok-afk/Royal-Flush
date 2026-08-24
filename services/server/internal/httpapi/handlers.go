@@ -165,7 +165,16 @@ func (s *Server) updateMe(writer http.ResponseWriter, request *http.Request) {
 		writeProblem(writer, http.StatusServiceUnavailable, "identity_store_unavailable", "用户资料暂时无法保存")
 		return
 	}
-	writeJSON(writer, http.StatusOK, map[string]any{"user": user, "balance": s.scores.Balance(user.ID), "activeRoomId": s.rooms.ActiveRoom(user.ID)})
+	activeRoomID := s.rooms.ActiveRoom(user.ID)
+	if activeRoomID != "" {
+		if actor, ok := s.rooms.Room(activeRoomID); ok {
+			if err := actor.UpdateIdentity(request.Context(), room.Identity{ID: user.ID, Name: user.Nickname}); err != nil {
+				writeProblem(writer, http.StatusServiceUnavailable, "room_profile_unavailable", "昵称已保存，但暂时无法同步到当前房间")
+				return
+			}
+		}
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"user": user, "balance": s.scores.Balance(user.ID), "activeRoomId": activeRoomID})
 }
 
 func (s *Server) persistIdentity(request *http.Request, user auth.User) error {

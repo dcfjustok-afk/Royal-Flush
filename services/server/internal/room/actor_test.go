@@ -150,6 +150,39 @@ func TestRoomOwnerControlsAndAutomaticTransferUseJoinOrder(t *testing.T) {
 	}
 }
 
+func TestUpdatingIdentitySynchronizesRoomSnapshotAndEvent(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	actor, err := NewActor(testConfig(), Identity{ID: "owner", Name: "旧昵称"}, score.NewService(nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer actor.Close()
+	events, unsubscribe, err := actor.Subscribe(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unsubscribe()
+	if err := actor.UpdateIdentity(ctx, Identity{ID: "owner", Name: "新昵称"}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := actor.Snapshot(ctx, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if localPlayer(snapshot).Name != "新昵称" {
+		t.Fatalf("room snapshot kept stale nickname: %#v", snapshot.Players)
+	}
+	select {
+	case event := <-events:
+		if event.Type != "room.player_profile_updated" {
+			t.Fatalf("unexpected profile event: %#v", event)
+		}
+	case <-ctx.Done():
+		t.Fatal("profile update event was not published")
+	}
+}
+
 func TestRotatingInviteCodeInvalidatesThePreviousCode(t *testing.T) {
 	ctx := context.Background()
 	manager := NewManager(score.NewService(nil))
