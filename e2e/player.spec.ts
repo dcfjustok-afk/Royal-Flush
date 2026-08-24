@@ -260,6 +260,40 @@ test("准备请求进行中刷新会从服务端恢复最终状态", async ({ pa
   expect(commands).toBe(1);
 });
 
+test("玩家可以从等候室主动离开且快速点击只提交一次", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1440", "代表性桌面项目覆盖等候室离开流程");
+  const waiting = structuredClone(playerSnapshot);
+  waiting.street = "waiting";
+  waiting.handNumber = 0;
+  waiting.players.forEach((player) => {
+    player.isCurrentActor = false;
+    player.isReady = false;
+  });
+  let leaveCommands = 0;
+  await page.route("**/api/v1/rooms/room-saturday/snapshot", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify(waiting),
+  }));
+  await page.route("**/api/v1/rooms/room-saturday/commands", async (route) => {
+    const command = route.request().postDataJSON() as { type: string };
+    if (command.type === "room.leave") leaveCommands++;
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ duplicate: false, event: { type: "room.player_leaving" } }) });
+  });
+  page.on("dialog", (dialog) => dialog.accept());
+
+  await page.goto("/rooms/room-saturday/waiting");
+  const leave = page.getByRole("button", { name: "离开当前房间" });
+  await leave.evaluate((button: HTMLButtonElement) => {
+    button.click();
+    button.click();
+  });
+  await expect(page).toHaveURL(/\/$/);
+  expect(leaveCommands).toBe(1);
+  await expect(page.locator(".form-message.error")).toHaveCount(0);
+});
+
 test("跨房失败会保留原房间且重试成功后进入目标房间", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1440", "代表性桌面项目覆盖跨房失败与重试");
   const oldRoom = structuredClone(playerSnapshot);
