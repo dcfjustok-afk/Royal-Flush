@@ -18,8 +18,7 @@ func (s *Server) roomEvents(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	user := currentUser(request)
-	snapshot, err := actor.Snapshot(request.Context(), user.ID)
-	if err != nil {
+	if _, err := actor.Snapshot(request.Context(), user.ID); err != nil {
 		writeDomainError(writer, err)
 		return
 	}
@@ -36,6 +35,11 @@ func (s *Server) roomEvents(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	defer func() { _ = actor.PlayerDisconnected(context.Background(), user.ID) }()
+	snapshot, err := actor.Snapshot(ctx, user.ID)
+	if err != nil {
+		_ = connection.Close(websocket.StatusInternalError, "snapshot unavailable")
+		return
+	}
 	events, unsubscribe, err := actor.Subscribe(ctx)
 	if err != nil {
 		_ = connection.Close(websocket.StatusInternalError, "subscription failed")

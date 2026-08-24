@@ -176,6 +176,89 @@ func TestOTPAndWebSocketSnapshot(t *testing.T) {
 	}
 }
 
+func TestWebSocketReconnectStartsWithCurrentAuthoritativeSnapshot(t *testing.T) {
+	application := New(Config{Development: true}, nil)
+	t.Cleanup(application.Close)
+	server := httptest.NewServer(application.Handler())
+	defer server.Close()
+	client := server.Client()
+	userHeaders := map[string]string{"X-User-ID": "reconnect-user", "X-User-Name": "Reconnect"}
+	roomBody := map[string]any{
+		"name": "Reconnect room", "maxPlayers": 2, "blindPreset": "5/10", "actionSeconds": 20,
+		"voiceEnabled": false, "chipDenominations": []int{5, 10, 20, 50, 100},
+	}
+	response := request(t, client, http.MethodPost, server.URL+"/api/v1/rooms", roomBody, userHeaders)
+	var created struct {
+		ID string `json:"id"`
+	}
+	decodeResponse(t, response, &created)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/v1/rooms/" + created.ID + "/events"
+	connection, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{HTTPHeader: http.Header{"X-User-ID": []string{"reconnect-user"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var first room.Envelope
+	if err := wsjson.Read(ctx, connection, &first); err != nil {
+		t.Fatal(err)
+	}
+	if err := connection.Close(websocket.StatusNormalClosure, "reconnect test"); err != nil {
+		t.Fatal(err)
+	}
+
+	disconnected := waitForPlayerStatus(t, client, server.URL, created.ID, userHeaders, "disconnected")
+	reconnected, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{HTTPHeader: http.Header{"X-User-ID": []string{"reconnect-user"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reconnected.Close(websocket.StatusNormalClosure, "test complete")
+	var initial room.Envelope
+	if err := wsjson.Read(ctx, reconnected, &initial); err != nil {
+		t.Fatal(err)
+	}
+	var snapshot room.TableSnapshot
+	raw, err := json.Marshal(initial.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if initial.Type != "table.snapshot" || snapshot.Version <= disconnected.Version {
+		t.Fatalf("reconnect snapshot version = %d, disconnected version = %d", snapshot.Version, disconnected.Version)
+	}
+	if statusFor(snapshot, "reconnect-user") == "disconnected" {
+		t.Fatalf("reconnect snapshot still reports disconnected player: %#v", snapshot.Players)
+	}
+}
+
+func waitForPlayerStatus(t *testing.T, client *http.Client, baseURL, roomID string, headers map[string]string, wanted string) room.TableSnapshot {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		response := request(t, client, http.MethodGet, baseURL+"/api/v1/rooms/"+roomID+"/snapshot", nil, headers)
+		var snapshot room.TableSnapshot
+		decodeResponse(t, response, &snapshot)
+		if statusFor(snapshot, headers["X-User-ID"]) == wanted {
+			return snapshot
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("player %s did not reach status %s", headers["X-User-ID"], wanted)
+	return room.TableSnapshot{}
+}
+
+func statusFor(snapshot room.TableSnapshot, userID string) string {
+	for _, player := range snapshot.Players {
+		if player.ID == userID {
+			return player.Status
+		}
+	}
+	return ""
+}
+
 func TestOperationsUserRoomReportAndAuditFlows(t *testing.T) {
 	application := New(Config{Development: true}, nil)
 	t.Cleanup(application.Close)
