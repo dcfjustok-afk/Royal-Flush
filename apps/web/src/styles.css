@@ -444,6 +444,49 @@ fieldset { min-width: 0; margin: 0 0 18px; border: 0; padding: 0; }
 .panel-enter-active, .panel-leave-active { transition: transform 180ms cubic-bezier(.2,.8,.2,1), opacity 180ms ease-out; }
 .panel-enter-from, .panel-leave-to { opacity: 0; transform: translateX(30px); }
 
+/* Persistent account workstation */
+.account-page { display: grid; grid-template-columns: minmax(430px, 1.08fr) minmax(470px, .92fr); grid-template-rows: 72px 1fr; min-height: calc(100vh - 46px); }
+.account-page .invite-header { grid-column: 1 / -1; }
+.account-manifesto { position: relative; display: flex; min-height: 650px; flex-direction: column; justify-content: center; overflow: hidden; border-right: 1px solid var(--line); padding: 72px max(48px, 9vw); background: var(--table); isolation: isolate; }
+.account-manifesto::before { position: absolute; z-index: -1; width: 520px; height: 520px; right: -230px; bottom: -180px; border: 1px solid rgba(115,198,160,.22); border-radius: 50%; box-shadow: 0 0 0 54px rgba(115,198,160,.025), 0 0 0 108px rgba(115,198,160,.018); content: ""; }
+.account-manifesto::after { position: absolute; z-index: -1; inset: 0; opacity: .22; background-image: linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px); background-size: 42px 42px; content: ""; mask-image: linear-gradient(to bottom, black, transparent 82%); }
+.account-live-label, .auth-signal, .account-trust-line { display: flex; align-items: center; gap: 9px; color: var(--mint); font-size: .7rem; }
+.account-manifesto h1 { margin-top: 30px; font-size: clamp(3rem, 5.4vw, 5.9rem); line-height: .97; letter-spacing: -.055em; }
+.account-manifesto h1 em { color: var(--mint); font-style: normal; }
+.account-manifesto > p { max-width: 620px; margin-top: 28px; color: #c3c1b8; font-size: .84rem; }
+.account-manifesto dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin: 48px 0 0; background: #4b4d46; }
+.account-manifesto dl div { min-width: 0; background: #22231f; padding: 16px; }
+.account-manifesto dt { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: .62rem; }
+.account-manifesto dd { margin: 10px 0 0; font: 700 1.05rem/1 var(--numeric); }
+.account-trust-line { margin-top: 22px; color: var(--muted); }
+.account-access { position: relative; display: grid; place-items: center; padding: 68px; }
+.account-access-panel { width: min(410px, 100%); }
+.auth-signal svg { width: 18px; height: 18px; }
+.auth-mode-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin: 24px 0 30px; border: 1px solid var(--line); border-radius: 4px; background: var(--line); overflow: hidden; }
+.auth-mode-switch button { display: flex; min-height: 42px; align-items: center; justify-content: center; gap: 7px; border: 0; background: #191a17; color: var(--muted); font-size: .74rem; }
+.auth-mode-switch button.active { background: var(--bone); color: var(--ink); }
+.account-access-panel h2 { margin-top: 0; }
+.account-access-panel form { display: grid; margin-top: 28px; }
+.account-access-panel form label { margin-top: 15px; }
+.account-access-panel form label:first-child { margin-top: 0; }
+.password-field { position: relative; }
+.password-field input { padding-right: 46px; }
+.password-field button { position: absolute; top: 4px; right: 4px; display: grid; width: 38px; height: 38px; place-items: center; border: 0; background: transparent; color: var(--muted); }
+.account-security-note { margin-top: 16px !important; border-top: 1px solid var(--line-soft); padding-top: 14px; color: var(--faint) !important; font-size: .62rem !important; }
+.invite-signed-in .button { margin-top: 26px; }
+.account-required { display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; align-items: center; gap: 4px 12px; margin-top: 18px; border: 1px solid var(--line); border-radius: 6px; padding: 18px; }
+.account-required strong { font-size: .78rem; }
+.account-required span { color: var(--muted); font-size: .62rem; }
+.account-required svg { grid-column: 2; grid-row: 1 / 3; color: var(--mint); }
+.profile-account-form { display: grid; gap: 8px; border-top: 1px solid var(--line); padding-top: 18px; }
+.profile-account-form > label { color: var(--muted); font-size: .66rem; }
+.profile-account-form > div { display: grid; grid-template-columns: 1fr auto; gap: 7px; }
+.account-logout { display: flex; align-items: center; gap: 12px; border: 1px solid #593732; border-radius: 5px; background: #211714; color: #ef8d82; padding: 13px 14px; text-align: left; }
+.account-logout > span { display: flex; flex-direction: column; gap: 3px; }
+.account-logout strong { font-size: .72rem; }
+.account-logout small { color: var(--muted); font-size: .58rem; }
+.account-facts dd { max-width: 225px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 @keyframes meter { 0%,100% { transform: scaleY(.45); } 50% { transform: scaleY(1); } }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
@@ -489,6 +532,14 @@ fieldset { min-width: 0; margin: 0 0 18px; border: 0; padding: 0; }
   .invite-room h1 { font-size: 2.2rem; }
   .invite-room dl { margin-top: 30px; }
   .invite-auth { padding: 42px 24px 80px; }
+	.account-page { display: block; min-height: calc(100vh - 64px); }
+	.account-manifesto { min-height: 420px; border-right: 0; border-bottom: 1px solid var(--line); padding: 54px 24px; }
+	.account-manifesto h1 { font-size: clamp(3rem, 15vw, 4.7rem); }
+	.account-manifesto dl { margin-top: 34px; }
+	.account-manifesto dl div { padding: 12px 10px; }
+	.account-manifesto dd { font-size: .82rem; }
+	.account-trust-line { align-items: flex-start; }
+	.account-access { padding: 46px 24px 84px; }
   .auth-legal { position: static; margin: 26px auto 0; }
   .form-page-content { padding-top: 24px; }
   .form-page-heading, .profile-heading { align-items: flex-start; }

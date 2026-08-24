@@ -27,6 +27,7 @@ type Config struct {
 	AdminPassword  string
 	Voice          voice.Config
 	Readiness      func(context.Context) error
+	AuthStore      auth.Store
 	ScoreStore     score.Store
 	RoomStore      room.Store
 	RoomLease      room.Lease
@@ -37,13 +38,14 @@ type Config struct {
 }
 
 type Server struct {
-	config Config
-	log    *slog.Logger
-	auth   *auth.Service
-	scores *score.Service
-	rooms  *room.Manager
-	ops    operations.Store
-	router http.Handler
+	config   Config
+	log      *slog.Logger
+	auth     *auth.Service
+	scores   *score.Service
+	rooms    *room.Manager
+	ops      operations.Store
+	voiceHub *voiceHub
+	router   http.Handler
 }
 
 type contextKey string
@@ -54,13 +56,13 @@ func New(config Config, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	authService := auth.NewService(config.Development, nil)
+	authService := auth.NewServiceWithStore(config.Development, nil, config.AuthStore)
 	scoreService := score.NewServiceWithStore(config.ScoreStore, nil)
 	operationsStore := config.Operations
 	if operationsStore == nil {
 		operationsStore = operations.NewMemoryStore()
 	}
-	server := &Server{config: config, log: logger, auth: authService, scores: scoreService, ops: operationsStore}
+	server := &Server{config: config, log: logger, auth: authService, scores: scoreService, ops: operationsStore, voiceHub: newVoiceHub()}
 	server.rooms = room.NewManagerWithInfrastructure(scoreService, config.RoomStore, config.RoomLease, config.InstanceID)
 	server.router = server.routes()
 	return server
@@ -90,11 +92,15 @@ func (s *Server) routes() http.Handler {
 	router.Get("/api/v1/ready", s.readiness)
 	router.Post("/api/v1/auth/otp/request", s.requestOTP)
 	router.Post("/api/v1/auth/otp/verify", s.verifyOTP)
+	router.Post("/api/v1/auth/register", s.register)
+	router.Post("/api/v1/auth/login", s.login)
+	router.Post("/api/v1/auth/logout", s.logout)
 	router.Post("/api/v1/auth/password/login", s.passwordLogin)
 	router.Get("/api/v1/rooms/{roomID}/public", s.publicRoom)
 	router.Group(func(protected chi.Router) {
 		protected.Use(s.authenticate)
 		protected.Get("/api/v1/me", s.me)
+		protected.Patch("/api/v1/me", s.updateMe)
 		protected.Post("/api/v1/me/score-additions", s.addScore)
 		protected.Get("/api/v1/me/score-ledger", s.scoreLedger)
 		protected.Post("/api/v1/reports", s.createReport)
@@ -103,6 +109,7 @@ func (s *Server) routes() http.Handler {
 		protected.Get("/api/v1/rooms/{roomID}/snapshot", s.roomSnapshot)
 		protected.Post("/api/v1/rooms/{roomID}/commands", s.roomCommand)
 		protected.Post("/api/v1/rooms/{roomID}/voice-token", s.voiceToken)
+		protected.Get("/api/v1/rooms/{roomID}/voice-events", s.voiceEvents)
 		protected.Get("/api/v1/rooms/{roomID}/events", s.roomEvents)
 		protected.Post("/api/v1/admin/score-resets", s.resetScores)
 		protected.Get("/api/v1/admin/score-epochs", s.scoreEpochs)
@@ -135,7 +142,12 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		var user auth.User
 		var ok bool
 		if cookie, err := request.Cookie("rf_session"); err == nil {
-			user, ok = s.auth.UserBySession(cookie.Value)
+			var authErr error
+			user, ok, authErr = s.auth.UserBySession(request.Context(), cookie.Value)
+			if authErr != nil {
+				writeProblem(writer, http.StatusServiceUnavailable, "session_store_unavailable", "登录状态暂时无法确认")
+				return
+			}
 		}
 		if !ok && s.config.Development {
 			userID := request.Header.Get("X-User-ID")
@@ -146,7 +158,12 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			if request.Header.Get("X-Admin") == "true" {
 				permissions = append(permissions, "score:reset-all", "admin:read", "user:ban", "report:manage")
 			}
-			user = s.auth.EnsureDevelopmentUser(userID, request.Header.Get("X-User-Name"), permissions...)
+			var authErr error
+			user, authErr = s.auth.EnsureDevelopmentUser(request.Context(), userID, request.Header.Get("X-User-Name"), permissions...)
+			if authErr != nil {
+				writeProblem(writer, http.StatusServiceUnavailable, "identity_store_unavailable", "开发身份暂时无法保存")
+				return
+			}
 			ok = true
 		}
 		if !ok {
@@ -185,7 +202,7 @@ func (s *Server) cors(next http.Handler) http.Handler {
 		}
 		if request.Method == http.MethodOptions {
 			writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-User-ID, X-User-Name, X-Admin")
-			writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
 			writer.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -245,6 +262,14 @@ func writeDomainError(writer http.ResponseWriter, err error) {
 		status, code = http.StatusUnauthorized, "invalid_otp"
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		status, code = http.StatusUnauthorized, "invalid_credentials"
+	case errors.Is(err, auth.ErrOTPUnavailable):
+		status, code = http.StatusServiceUnavailable, "otp_unavailable"
+	case errors.Is(err, auth.ErrAccountBanned):
+		status, code = http.StatusForbidden, "account_banned"
+	case errors.Is(err, auth.ErrPhoneRegistered):
+		status, code = http.StatusConflict, "phone_registered"
+	case errors.Is(err, auth.ErrInvalidPhone), errors.Is(err, auth.ErrWeakPassword), errors.Is(err, auth.ErrInvalidNickname):
+		status, code = http.StatusBadRequest, "invalid_account"
 	case errors.Is(err, operations.ErrUserNotFound), errors.Is(err, operations.ErrReportNotFound):
 		status, code = http.StatusNotFound, "not_found"
 	case errors.Is(err, operations.ErrReasonRequired), errors.Is(err, operations.ErrInvalidStatus):

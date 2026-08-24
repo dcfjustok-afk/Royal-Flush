@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 	"sort"
 	"strconv"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/royal-flush/royal-flush/services/server/internal/auth"
 	"github.com/royal-flush/royal-flush/services/server/internal/operations"
 	"github.com/royal-flush/royal-flush/services/server/internal/room"
 )
@@ -102,7 +104,10 @@ func (s *Server) adminSetUserBanned(writer http.ResponseWriter, request *http.Re
 		writeDomainError(writer, err)
 		return
 	}
-	s.auth.SetBanned(userID, input.Banned)
+	if err := s.auth.SetBanned(request.Context(), userID, input.Banned); err != nil && !errors.Is(err, auth.ErrUserNotFound) {
+		writeProblem(writer, http.StatusServiceUnavailable, "identity_store_unavailable", "用户状态暂时无法同步")
+		return
+	}
 	writeJSON(writer, http.StatusOK, map[string]any{"user": user, "duplicate": duplicate})
 }
 

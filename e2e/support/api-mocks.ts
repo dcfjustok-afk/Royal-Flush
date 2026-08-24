@@ -60,7 +60,16 @@ export const playerSnapshot: TableSnapshot = {
   ],
 };
 
-export async function mockPlayerApi(page: Page) {
+export async function mockPlayerApi(page: Page, options: { authenticated?: boolean } = {}) {
+  let authenticated = options.authenticated ?? true;
+  const account = {
+    id: "me",
+    phone: "13800138000",
+    nickname: "你",
+    permissions: {},
+    banned: false,
+    createdAt: timestamp,
+  };
   await page.addInitScript(() => {
     class StableWebSocket extends EventTarget {
       static readonly CONNECTING = 0;
@@ -94,7 +103,23 @@ export async function mockPlayerApi(page: Page) {
     const path = new URL(request.url()).pathname;
 
     if (path === "/api/v1/health") return json(route, { status: "ok" });
-    if (path === "/api/v1/me") return json(route, { user: { id: "me", nickname: "你" }, balance: 1860, activeRoomId: "" });
+    if ((path === "/api/v1/auth/login" || path === "/api/v1/auth/register") && request.method() === "POST") {
+      authenticated = true;
+      const input = request.postDataJSON() as { nickname?: string };
+      if (input.nickname) account.nickname = input.nickname;
+      return json(route, { user: account, balance: 1860 }, path.endsWith("/register") ? 201 : 200);
+    }
+    if (path === "/api/v1/auth/logout" && request.method() === "POST") {
+      authenticated = false;
+      return json(route, { ok: true });
+    }
+    if (path === "/api/v1/me" && request.method() === "PATCH") {
+      const input = request.postDataJSON() as { nickname: string };
+      account.nickname = input.nickname;
+      return json(route, { user: account, balance: 1860, activeRoomId: "" });
+    }
+    if (path === "/api/v1/me") return authenticated ? json(route, { user: account, balance: 1860, activeRoomId: "" }) : json(route, { code: "authentication_required", message: "请先完成登录" }, 401);
+    if (!authenticated) return json(route, { code: "authentication_required", message: "请先完成登录" }, 401);
     if (path === "/api/v1/me/score-ledger") return json(route, { balance: 1860, entries: [] });
     if (path.endsWith("/snapshot")) return json(route, playerSnapshot);
     if (path.endsWith("/public")) return json(route, {

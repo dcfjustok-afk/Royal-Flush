@@ -5,8 +5,10 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/royal-flush/royal-flush/services/server/internal/auth"
 	"github.com/royal-flush/royal-flush/services/server/internal/operations"
 	"github.com/royal-flush/royal-flush/services/server/internal/room"
+	"github.com/royal-flush/royal-flush/services/server/internal/voice"
 )
 
 func (s *Server) requestOTP(writer http.ResponseWriter, request *http.Request) {
@@ -39,7 +41,7 @@ func (s *Server) verifyOTP(writer http.ResponseWriter, request *http.Request) {
 		writeProblem(writer, http.StatusBadRequest, "invalid_json", "请求格式不正确")
 		return
 	}
-	user, token, err := s.auth.Verify(input.Phone, input.Code, input.Nickname)
+	user, token, err := s.auth.Verify(request.Context(), input.Phone, input.Code, input.Nickname)
 	if err != nil {
 		writeDomainError(writer, err)
 		return
@@ -49,11 +51,69 @@ func (s *Server) verifyOTP(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	s.scores.EnsureUser(user.ID)
-	http.SetCookie(writer, &http.Cookie{
-		Name: "rf_session", Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode,
-		Secure: !s.config.Development, MaxAge: int((30 * 24 * time.Hour).Seconds()),
-	})
+	s.setSessionCookie(writer, token)
 	writeJSON(writer, http.StatusOK, map[string]any{"user": user, "balance": s.scores.Balance(user.ID)})
+}
+
+func (s *Server) register(writer http.ResponseWriter, request *http.Request) {
+	var input struct {
+		Phone    string `json:"phone"`
+		Password string `json:"password"`
+		Nickname string `json:"nickname"`
+	}
+	if err := decodeJSON(request, &input); err != nil {
+		writeProblem(writer, http.StatusBadRequest, "invalid_json", "请求格式不正确")
+		return
+	}
+	user, token, err := s.auth.Register(request.Context(), input.Phone, input.Password, input.Nickname)
+	if err != nil {
+		writeDomainError(writer, err)
+		return
+	}
+	if err := s.persistIdentity(request, user); err != nil {
+		writeProblem(writer, http.StatusServiceUnavailable, "identity_store_unavailable", "用户资料暂时无法保存")
+		return
+	}
+	s.scores.EnsureUser(user.ID)
+	s.setSessionCookie(writer, token)
+	writeJSON(writer, http.StatusCreated, map[string]any{"user": user, "balance": s.scores.Balance(user.ID)})
+}
+
+func (s *Server) login(writer http.ResponseWriter, request *http.Request) {
+	var input struct {
+		Phone    string `json:"phone"`
+		Password string `json:"password"`
+	}
+	if err := decodeJSON(request, &input); err != nil {
+		writeProblem(writer, http.StatusBadRequest, "invalid_json", "请求格式不正确")
+		return
+	}
+	user, token, err := s.auth.Login(request.Context(), input.Phone, input.Password)
+	if err != nil {
+		writeDomainError(writer, err)
+		return
+	}
+	if err := s.persistIdentity(request, user); err != nil {
+		writeProblem(writer, http.StatusServiceUnavailable, "identity_store_unavailable", "用户资料暂时无法保存")
+		return
+	}
+	s.scores.EnsureUser(user.ID)
+	s.setSessionCookie(writer, token)
+	writeJSON(writer, http.StatusOK, map[string]any{"user": user, "balance": s.scores.Balance(user.ID)})
+}
+
+func (s *Server) logout(writer http.ResponseWriter, request *http.Request) {
+	if cookie, err := request.Cookie("rf_session"); err == nil {
+		if err := s.auth.Logout(request.Context(), cookie.Value); err != nil {
+			writeProblem(writer, http.StatusServiceUnavailable, "session_store_unavailable", "暂时无法退出登录")
+			return
+		}
+	}
+	http.SetCookie(writer, &http.Cookie{
+		Name: "rf_session", Value: "", Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode,
+		Secure: !s.config.Development, MaxAge: -1, Expires: time.Unix(1, 0),
+	})
+	writeJSON(writer, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Server) passwordLogin(writer http.ResponseWriter, request *http.Request) {
@@ -65,7 +125,7 @@ func (s *Server) passwordLogin(writer http.ResponseWriter, request *http.Request
 		writeProblem(writer, http.StatusBadRequest, "invalid_json", "请求格式不正确")
 		return
 	}
-	user, token, err := s.auth.PasswordLogin(input.Account, input.Password, s.config.AdminAccount, s.config.AdminPassword)
+	user, token, err := s.auth.PasswordLogin(request.Context(), input.Account, input.Password, s.config.AdminAccount, s.config.AdminPassword)
 	if err != nil {
 		writeDomainError(writer, err)
 		return
@@ -75,16 +135,44 @@ func (s *Server) passwordLogin(writer http.ResponseWriter, request *http.Request
 		return
 	}
 	s.scores.EnsureUser(user.ID)
-	http.SetCookie(writer, &http.Cookie{
-		Name: "rf_session", Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode,
-		Secure: !s.config.Development, MaxAge: int((30 * 24 * time.Hour).Seconds()),
-	})
+	s.setSessionCookie(writer, token)
 	writeJSON(writer, http.StatusOK, map[string]any{"user": user, "balance": s.scores.Balance(user.ID)})
 }
 
 func (s *Server) me(writer http.ResponseWriter, request *http.Request) {
 	user := currentUser(request)
 	writeJSON(writer, http.StatusOK, map[string]any{"user": user, "balance": s.scores.Balance(user.ID), "activeRoomId": s.rooms.ActiveRoom(user.ID)})
+}
+
+func (s *Server) updateMe(writer http.ResponseWriter, request *http.Request) {
+	var input struct {
+		Nickname string `json:"nickname"`
+	}
+	if err := decodeJSON(request, &input); err != nil {
+		writeProblem(writer, http.StatusBadRequest, "invalid_json", "请求格式不正确")
+		return
+	}
+	user, err := s.auth.UpdateNickname(request.Context(), currentUser(request).ID, input.Nickname)
+	if err != nil {
+		writeDomainError(writer, err)
+		return
+	}
+	if err := s.persistIdentity(request, user); err != nil {
+		writeProblem(writer, http.StatusServiceUnavailable, "identity_store_unavailable", "用户资料暂时无法保存")
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"user": user, "balance": s.scores.Balance(user.ID), "activeRoomId": s.rooms.ActiveRoom(user.ID)})
+}
+
+func (s *Server) persistIdentity(request *http.Request, user auth.User) error {
+	return s.ops.UpsertUser(request.Context(), operations.UserIdentity{ID: user.ID, Phone: user.Phone, Nickname: user.Nickname, CreatedAt: user.CreatedAt})
+}
+
+func (s *Server) setSessionCookie(writer http.ResponseWriter, token string) {
+	http.SetCookie(writer, &http.Cookie{
+		Name: "rf_session", Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode,
+		Secure: !s.config.Development, MaxAge: int((30 * 24 * time.Hour).Seconds()), Expires: time.Now().UTC().Add(30 * 24 * time.Hour),
+	})
 }
 
 func (s *Server) addScore(writer http.ResponseWriter, request *http.Request) {
@@ -225,8 +313,13 @@ func (s *Server) voiceToken(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	user := currentUser(request)
-	if _, err := actor.Snapshot(request.Context(), user.ID); err != nil {
+	snapshot, err := actor.Snapshot(request.Context(), user.ID)
+	if err != nil {
 		writeDomainError(writer, err)
+		return
+	}
+	if !snapshot.Config.VoiceEnabled {
+		writeJSON(writer, http.StatusOK, voice.Token{Enabled: false, Reason: "这个房间没有开启语音"})
 		return
 	}
 	token, err := s.config.Voice.Issue(user.ID, user.Nickname, actor.ID, time.Now())
