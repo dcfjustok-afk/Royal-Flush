@@ -608,6 +608,31 @@ func TestProcessedCommandKeysRemainValidPostgresJSON(t *testing.T) {
 	}
 }
 
+func TestCommandRejectsControlCharactersInRequestID(t *testing.T) {
+	actor, err := NewActor(testConfig(), Identity{ID: "owner", Name: "房主"}, score.NewService(nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer actor.Close()
+	before, err := actor.Snapshot(context.Background(), "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload, _ := json.Marshal(map[string]any{"ready": true})
+	_, _, err = actor.Handle(context.Background(), "owner", ClientCommand{Type: "room.ready", RequestID: "ready\x00request", Payload: payload})
+	if !errors.Is(err, score.ErrRequestID) {
+		t.Fatalf("Handle error = %v, want score.ErrRequestID", err)
+	}
+	after, err := actor.Snapshot(context.Background(), "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Version != before.Version || after.Players[0].IsReady != before.Players[0].IsReady {
+		t.Fatalf("invalid request id changed room: before=%+v after=%+v", before, after)
+	}
+}
+
 func TestCommandPersistenceFailureRestoresActorState(t *testing.T) {
 	ctx := context.Background()
 	actor, err := NewActor(testConfig(), Identity{ID: "owner", Name: "房主"}, score.NewService(nil), nil)

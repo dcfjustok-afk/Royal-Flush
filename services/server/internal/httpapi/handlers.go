@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/royal-flush/royal-flush/services/server/internal/auth"
 	"github.com/royal-flush/royal-flush/services/server/internal/operations"
+	"github.com/royal-flush/royal-flush/services/server/internal/requestid"
 	"github.com/royal-flush/royal-flush/services/server/internal/room"
 	"github.com/royal-flush/royal-flush/services/server/internal/voice"
 )
@@ -199,6 +200,10 @@ func (s *Server) addScore(writer http.ResponseWriter, request *http.Request) {
 		writeProblem(writer, http.StatusBadRequest, "invalid_json", "请求格式不正确")
 		return
 	}
+	if !requestid.Valid(input.RequestID) {
+		writeProblem(writer, http.StatusBadRequest, "invalid_request_id", "请求标识不正确")
+		return
+	}
 	user := currentUser(request)
 	result, err := s.scores.Add(user.ID, input.RoomID, input.RequestID, input.Amount)
 	if err != nil {
@@ -378,7 +383,7 @@ func (s *Server) resetScores(writer http.ResponseWriter, request *http.Request) 
 		writeProblem(writer, http.StatusBadRequest, "invalid_json", "重置请求格式不正确")
 		return
 	}
-	if input.Confirmation != "RESET ALL SCORES" || input.RequestID == "" {
+	if input.Confirmation != "RESET ALL SCORES" || !requestid.Valid(input.RequestID) {
 		writeProblem(writer, http.StatusBadRequest, "confirmation_required", "请输入 RESET ALL SCORES 并提供 requestId")
 		return
 	}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/royal-flush/royal-flush/services/server/internal/idgen"
 	"github.com/royal-flush/royal-flush/services/server/internal/poker"
+	"github.com/royal-flush/royal-flush/services/server/internal/requestid"
 	"github.com/royal-flush/royal-flush/services/server/internal/score"
 )
 
@@ -392,7 +393,7 @@ func (a *Actor) Handle(ctx context.Context, userID string, command ClientCommand
 		if a.ended {
 			return nil, ErrRoomClosed
 		}
-		if command.RequestID == "" {
+		if !requestid.Valid(command.RequestID) {
 			return nil, score.ErrRequestID
 		}
 		key := processedKey("command", userID, command.RequestID)
