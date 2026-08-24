@@ -98,6 +98,9 @@ func TestFoldAwardsPotOnlyToAPlayerDealtIntoTheHand(t *testing.T) {
 	if game.Seats[winner].Stack <= 1000 {
 		t.Fatalf("remaining participant did not receive the pot: seat=%d stack=%d", winner, game.Seats[winner].Stack)
 	}
+	if game.Pot() != 0 {
+		t.Fatalf("settled pot was not cleared: %d", game.Pot())
+	}
 }
 
 func TestCumulativeShortAllInsReopenRaise(t *testing.T) {

@@ -533,8 +533,12 @@ func (g *Game) finishHand() {
 	g.Actor = -1
 	g.pending = make(map[int]bool)
 	for _, player := range g.Seats {
-		if player != nil && player.Stack == 0 {
-			player.Away = true
+		if player != nil {
+			player.StreetCommitted = 0
+			player.HandCommitted = 0
+			if player.Stack == 0 {
+				player.Away = true
+			}
 		}
 	}
 	g.Version++
