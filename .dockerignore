@@ -1,0 +1,11 @@
+.git
+.tools
+.impeccable
+apps/web/.impeccable
+node_modules
+**/node_modules
+**/dist
+coverage
+output
+*.log
+.env
