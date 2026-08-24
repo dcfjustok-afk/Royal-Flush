@@ -4,6 +4,7 @@ import { onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AccountAccessPanel from "@/components/AccountAccessPanel.vue";
 import BrandMark from "@/components/BrandMark.vue";
+import ThemeSwitcher from "@/components/ThemeSwitcher.vue";
 import VoiceMeter from "@/components/VoiceMeter.vue";
 import { useGameStore } from "@/stores/game";
 
@@ -28,8 +29,8 @@ onMounted(async () => {
 </script>
 
 <template>
-  <main class="account-page">
-    <header class="invite-header"><BrandMark /><RouterLink to="/"><ArrowLeft />返回首页</RouterLink></header>
+  <main id="main-content" class="account-page">
+    <header class="invite-header"><BrandMark /><div class="invite-header-actions"><ThemeSwitcher compact /><RouterLink to="/"><ArrowLeft />返回首页</RouterLink></div></header>
     <section class="account-manifesto">
       <div class="account-live-label"><VoiceMeter active /><span>玩家身份工作台</span></div>
       <h1>一份身份，<br /><em>留住每一局。</em></h1>

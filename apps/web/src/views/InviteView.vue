@@ -5,6 +5,7 @@ import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AccountAccessPanel from "@/components/AccountAccessPanel.vue";
 import BrandMark from "@/components/BrandMark.vue";
+import ThemeSwitcher from "@/components/ThemeSwitcher.vue";
 import VoiceMeter from "@/components/VoiceMeter.vue";
 import { api, apiMode } from "@/lib/api";
 import { useGameStore } from "@/stores/game";
@@ -51,8 +52,8 @@ onMounted(async () => {
 </script>
 
 <template>
-  <main class="invite-page">
-    <header class="invite-header"><BrandMark /><RouterLink to="/"><ArrowLeft />返回首页</RouterLink></header>
+  <main id="main-content" class="invite-page">
+    <header class="invite-header"><BrandMark /><div class="invite-header-actions"><ThemeSwitcher compact /><RouterLink to="/"><ArrowLeft />返回首页</RouterLink></div></header>
     <section class="invite-room">
       <div class="invite-signal"><VoiceMeter :active="Boolean(roomInfo)" /><span>{{ roomInfo ? "好友正在等你" : "正在读取房间" }}</span></div>
       <h1>{{ roomInfo?.name ?? "房间信息加载中" }}</h1>
