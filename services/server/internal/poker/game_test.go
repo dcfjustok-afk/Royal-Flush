@@ -39,6 +39,8 @@ func TestHeadsUpBlindsAndActionOrder(t *testing.T) {
 	game, _ := NewGame(8, 5, 10)
 	_, _ = game.Sit("u1", "一号", 0, "s1")
 	_, _ = game.Sit("u2", "二号", 4, "s2")
+	game.Seats[0].Ready = true
+	game.Seats[4].Ready = true
 	if err := game.StartHand(); err != nil {
 		t.Fatal(err)
 	}
@@ -47,6 +49,30 @@ func TestHeadsUpBlindsAndActionOrder(t *testing.T) {
 	}
 	if len(game.Seats[0].Hole) != 2 || len(game.Seats[4].Hole) != 2 {
 		t.Fatal("players did not receive exactly two cards")
+	}
+}
+
+func TestStartHandExcludesUnreadyAndDisconnectedPlayers(t *testing.T) {
+	game, _ := NewGame(4, 5, 10)
+	_, _ = game.Sit("owner", "房主", 0, "s1")
+	_, _ = game.Sit("ready", "已准备", 1, "s2")
+	_, _ = game.Sit("unready", "未准备", 2, "s3")
+	_, _ = game.Sit("offline", "已断线", 3, "s4")
+	game.Seats[0].Ready = true
+	game.Seats[1].Ready = true
+	game.Seats[3].Ready = true
+	game.Seats[3].Disconnected = true
+
+	if err := game.StartHand(); err != nil {
+		t.Fatal(err)
+	}
+	if len(game.Seats[0].Hole) != 2 || len(game.Seats[1].Hole) != 2 {
+		t.Fatal("ready connected players did not receive cards")
+	}
+	for _, seat := range []int{2, 3} {
+		if len(game.Seats[seat].Hole) != 0 || game.Seats[seat].HandCommitted != 0 {
+			t.Fatalf("ineligible seat %d joined the hand: %#v", seat, game.Seats[seat])
+		}
 	}
 }
 

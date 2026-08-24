@@ -82,6 +82,33 @@ func TestHandStartedEventNeverBroadcastsPrivateCards(t *testing.T) {
 	}
 }
 
+func TestGameStartRequiresTwoConnectedReadyPlayers(t *testing.T) {
+	ctx := context.Background()
+	actor, err := NewActor(testConfig(), Identity{ID: "owner", Name: "房主"}, score.NewService(nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer actor.Close()
+	if _, err := actor.Join(ctx, Identity{ID: "offline", Name: "断线玩家"}, 1); err != nil {
+		t.Fatal(err)
+	}
+	ready := json.RawMessage(`{"ready":true}`)
+	for _, userID := range []string{"owner", "offline"} {
+		if _, _, err := actor.Handle(ctx, userID, ClientCommand{Type: "room.ready", RequestID: "ready-" + userID, Payload: ready}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := actor.PlayerConnected(ctx, "offline"); err != nil {
+		t.Fatal(err)
+	}
+	if err := actor.PlayerDisconnected(ctx, "offline"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := actor.Handle(ctx, "owner", ClientCommand{Type: "game.start", RequestID: "start"}); !errors.Is(err, ErrPlayersNotReady) {
+		t.Fatalf("expected disconnected ready player to be excluded, got %v", err)
+	}
+}
+
 func TestRoomOwnerControlsAndAutomaticTransferUseJoinOrder(t *testing.T) {
 	ctx := context.Background()
 	manager := NewManager(score.NewService(nil))

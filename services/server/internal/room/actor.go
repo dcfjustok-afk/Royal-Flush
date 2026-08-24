@@ -492,7 +492,7 @@ func (a *Actor) applyCommand(userID string, seat int, command ClientCommand) (an
 		}
 		ready := 0
 		for _, participant := range a.game.Seats {
-			if participant != nil && participant.Ready && !participant.Leaving {
+			if participant != nil && participant.Ready && !participant.Away && !participant.Disconnected && !participant.Leaving && participant.Stack > 0 {
 				ready++
 			}
 		}

@@ -574,7 +574,7 @@ func (g *Game) requireActor(seat int) (*Player, error) {
 }
 
 func (g *Game) available(player *Player) bool {
-	return player != nil && !player.Away && !player.Leaving && player.Stack > 0
+	return player != nil && player.Ready && !player.Away && !player.Disconnected && !player.Leaving && player.Stack > 0
 }
 
 func (g *Game) canAct(player *Player) bool {
