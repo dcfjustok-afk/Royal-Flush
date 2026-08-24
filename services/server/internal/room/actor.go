@@ -349,6 +349,7 @@ func (a *Actor) Handle(ctx context.Context, userID string, command ClientCommand
 		if strings.HasPrefix(command.Type, "action.") && command.ExpectedVersion != a.version {
 			return nil, ErrVersionConflict
 		}
+		checkpoint := a.persistentState()
 		gameVersion := a.game.Version
 		payload, eventType, err := a.applyCommand(userID, seat, command)
 		if err != nil {
@@ -362,7 +363,7 @@ func (a *Actor) Handle(ctx context.Context, userID string, command ClientCommand
 		a.processed[key] = envelope
 		if a.onEvent != nil {
 			if err := a.onEvent(userID, envelope, a.persistentState()); err != nil {
-				delete(a.processed, key)
+				a.restorePersistentState(checkpoint)
 				return nil, err
 			}
 		}
@@ -990,6 +991,32 @@ func (a *Actor) persistentState() PersistentState {
 		Game: a.game.ExportState(), Identities: identities, JoinOrder: joinOrder, NextJoin: a.nextJoin,
 		Muted: muted, Messages: append([]SystemMessage(nil), a.messages...), Processed: processed,
 		Deadline: a.deadline, Ended: a.ended,
+	}
+}
+
+func (a *Actor) restorePersistentState(state PersistentState) {
+	game, err := poker.RestoreState(state.Game)
+	if err != nil {
+		panic(fmt.Sprintf("restore actor checkpoint: %v", err))
+	}
+	a.ID = state.Room.ID
+	a.Code = state.Room.Code
+	a.OwnerID = state.Room.OwnerID
+	a.CreatedAt = state.Room.CreatedAt
+	a.config = cloneConfig(state.Room.Config)
+	a.game = game
+	a.identities = cloneIdentityMap(state.Identities)
+	a.joinOrder = cloneInt64Map(state.JoinOrder)
+	a.nextJoin = state.NextJoin
+	a.muted = cloneBoolMap(state.Muted)
+	a.messages = append([]SystemMessage(nil), state.Messages...)
+	a.version = state.Room.Version
+	a.deadline = state.Deadline
+	a.ended = state.Ended
+	a.processed = cloneEnvelopeMap(state.Processed)
+	a.actionGen++
+	if a.game.InHand() && a.game.Actor >= 0 {
+		a.scheduleActionTimeoutAt(a.deadline)
 	}
 }
 

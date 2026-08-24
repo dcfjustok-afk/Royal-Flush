@@ -608,6 +608,48 @@ func TestProcessedCommandKeysRemainValidPostgresJSON(t *testing.T) {
 	}
 }
 
+func TestCommandPersistenceFailureRestoresActorState(t *testing.T) {
+	ctx := context.Background()
+	actor, err := NewActor(testConfig(), Identity{ID: "owner", Name: "房主"}, score.NewService(nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer actor.Close()
+	before, err := actor.Snapshot(ctx, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	persistErr := errors.New("database unavailable")
+	actor.onEvent = func(string, Envelope, PersistentState) error { return persistErr }
+	payload := json.RawMessage(`{"ready":true}`)
+	_, _, err = actor.Handle(ctx, "owner", ClientCommand{Type: "room.ready", RequestID: "ready-fails", Payload: payload})
+	if !errors.Is(err, persistErr) {
+		t.Fatalf("expected persistence error, got %v", err)
+	}
+	afterFailure, err := actor.Snapshot(ctx, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterFailure.Version != before.Version || localPlayer(afterFailure).IsReady {
+		t.Fatalf("failed command leaked into actor state: before=%#v after=%#v", before, afterFailure)
+	}
+	state, err := actor.PersistentState(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Processed) != 0 {
+		t.Fatalf("failed command retained idempotency state: %#v", state.Processed)
+	}
+	actor.onEvent = nil
+	if _, duplicate, err := actor.Handle(ctx, "owner", ClientCommand{Type: "room.ready", RequestID: "ready-fails", Payload: payload}); err != nil || duplicate {
+		t.Fatalf("retry after rollback failed: duplicate=%v err=%v", duplicate, err)
+	}
+	afterRetry, err := actor.Snapshot(ctx, "owner")
+	if err != nil || afterRetry.Version != before.Version+1 || !localPlayer(afterRetry).IsReady {
+		t.Fatalf("retry did not apply exactly once: snapshot=%#v err=%v", afterRetry, err)
+	}
+}
+
 func TestRoomActivityDoesNotPostponeTheActionDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
