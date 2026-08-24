@@ -30,6 +30,8 @@ async function copyInvite() {
 }
 
 async function toggleReady() {
+	if (store.commandPending) return;
+	actionError.value = "";
   const next = !ready.value;
   try {
     await store.sendCommand("room.ready", { ready: next });
@@ -39,6 +41,8 @@ async function toggleReady() {
 }
 
 async function startGame() {
+	if (store.commandPending) return;
+	actionError.value = "";
   try {
     await store.sendCommand("game.start");
     await router.push(`/rooms/${store.snapshot.roomId}/table`);
@@ -92,7 +96,7 @@ function selectMicrophone(event: Event) {
         <section class="invite-link"><header><h2>邀请链接</h2><Link2 /></header><code>{{ inviteUrl }}</code></section>
         <RoomManagementPanel v-if="isOwner" @room-ended="router.push('/')" />
         <p v-if="actionError" class="form-message error">{{ actionError }}</p>
-        <button class="ready-button" :class="{ ready }" type="button" @click="toggleReady"><Check v-if="ready" /><span><strong>{{ ready ? "已准备" : "准备入局" }}</strong><small>{{ ready ? "等待房主开始" : "确认牌局设置和语音状态" }}</small></span></button>
+        <button class="ready-button" :class="{ ready }" type="button" :disabled="store.commandPending" @click="toggleReady"><Check v-if="ready" /><span><strong>{{ store.commandPending ? "正在更新" : ready ? "已准备" : "准备入局" }}</strong><small>{{ ready ? "等待房主开始" : "确认牌局设置和语音状态" }}</small></span></button>
         <button class="button primary wide" type="button" :disabled="!ready || !isOwner || readyCount < 2 || !store.backendOnline" @click="startGame"><Play />{{ isOwner ? (readyCount < 2 ? "等待至少两人准备" : "开始牌局") : "等待房主开局" }}</button>
       </aside>
     </main>

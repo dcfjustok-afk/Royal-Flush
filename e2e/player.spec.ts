@@ -74,6 +74,38 @@ test("断线的已准备玩家不会让房主误开局", async ({ page }, testIn
   await expect(page.getByRole("button", { name: "等待至少两人准备" })).toBeDisabled();
 });
 
+test("快速重复点击准备只提交一次命令", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1440", "代表性桌面项目覆盖准备按钮并发");
+  const waiting = structuredClone(playerSnapshot);
+  waiting.street = "waiting";
+  waiting.handNumber = 0;
+  waiting.players = [
+    waiting.players.find((player) => player.id === "me")!,
+    waiting.players.find((player) => player.id === "p1")!,
+  ].map((player) => ({ ...player, isReady: false, isCurrentActor: false }));
+  let commands = 0;
+  await page.route("**/api/v1/rooms/room-saturday/snapshot", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(waiting) }));
+  await page.route("**/api/v1/rooms/room-saturday/commands", async (route) => {
+    commands++;
+    const command = route.request().postDataJSON() as { type: string; payload: { ready?: boolean } };
+    expect(command.type).toBe("room.ready");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const local = waiting.players.find((player) => player.isLocal);
+    if (local) local.isReady = command.payload.ready === true;
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ duplicate: false, event: { type: "room.ready_changed" } }) });
+  });
+
+  await page.goto("/rooms/room-saturday/waiting");
+  await page.getByRole("button", { name: /准备入局/ }).evaluate((button: HTMLButtonElement) => {
+    button.click();
+    button.click();
+  });
+  await expect(page.getByRole("button", { name: /正在更新/ })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /已准备/ })).toBeVisible();
+  expect(commands).toBe(1);
+  await expect(page.locator(".form-message.error")).toHaveCount(0);
+});
+
 test("牌桌在目标视口内保持完整且筹码不会改变布局", async ({ page }) => {
   await page.goto("/rooms/room-saturday/table");
   await expect(page.locator(".table-app")).toBeVisible();
