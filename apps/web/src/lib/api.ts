@@ -14,6 +14,29 @@ export class ApiError extends Error {
   }
 }
 
+export type ReportCategory = "conduct" | "voice" | "technical" | "other";
+
+export interface ReportRecord {
+  id: string;
+  reporterId: string;
+  roomId?: string;
+  subjectUserId?: string;
+  category: ReportCategory;
+  detail: string;
+  status: "open" | "reviewing" | "resolved" | "dismissed";
+  handledBy?: string;
+  handledAt?: string;
+  createdAt: string;
+}
+
+export interface CreateReportRequest {
+  roomId?: string;
+  subjectUserId?: string;
+  category: ReportCategory;
+  detail: string;
+  requestId: string;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${baseUrl}${path}`, {
     credentials: "include",
@@ -41,6 +64,7 @@ export const api = {
   roomSnapshot: (roomId: string) => request<TableSnapshot>(`/rooms/${roomId}/snapshot`),
   roomCommand: (roomId: string, body: { type: string; requestId: string; expectedVersion: number; payload: Record<string, unknown> }) => request<{ event: RoomEvent; duplicate: boolean }>(`/rooms/${roomId}/commands`, { method: "POST", body: JSON.stringify(body) }),
   voiceToken: (roomId: string) => request<{ enabled: boolean; url?: string; accessToken?: string; expiresAt?: string; reason?: string }>(`/rooms/${roomId}/voice-token`, { method: "POST", body: "{}" }),
+  createReport: (body: CreateReportRequest) => request<{ report: ReportRecord; duplicate: boolean }>("/reports", { method: "POST", body: JSON.stringify(body) }),
   resetScores: (body: ScoreResetRequest) => request<{ epoch: number; baseScore: number }>("/admin/score-resets", { method: "POST", body: JSON.stringify(body) }),
   webSocketUrl: (roomId: string) => {
     const configured = import.meta.env.VITE_WS_BASE_URL as string | undefined;

@@ -8,6 +8,7 @@ import ChipComposer from "@/components/ChipComposer.vue";
 import PlayerSeat from "@/components/PlayerSeat.vue";
 import PlayingCard from "@/components/PlayingCard.vue";
 import QuickMessagePanel from "@/components/QuickMessagePanel.vue";
+import ReportPanel from "@/components/ReportPanel.vue";
 import RoomManagementPanel from "@/components/RoomManagementPanel.vue";
 import ScoreAddPanel from "@/components/ScoreAddPanel.vue";
 import SystemBroadcast from "@/components/SystemBroadcast.vue";
@@ -148,6 +149,7 @@ onBeforeUnmount(() => {
           <section class="side-voice"><header><h3>麦克风</h3><Mic /></header><button class="toggle-row" type="button" :disabled="store.voiceBusy || store.localPlayer?.isMuted" @click="store.toggleMicrophone"><span><strong>{{ store.localPlayer?.isMuted ? "已被房主禁言" : store.voiceBusy ? "正在连接" : store.microphoneEnabled ? "已开启" : "已关闭" }}</strong><small>{{ store.voiceError || "语音不录制、不保存、不转写" }}</small></span><span class="switch" :class="{ checked: store.microphoneEnabled }" /></button><select v-if="store.microphones.length > 1" class="device-select" aria-label="麦克风设备" :value="store.selectedMicrophoneId" @change="selectMicrophone"><option v-for="device in store.microphones" :key="device.deviceId" :value="device.deviceId">{{ device.label }}</option></select></section>
           <button v-if="store.localPlayer?.tablePoints === 0" class="tool-button wide refill-button" type="button" :disabled="store.commandPending" @click="refill">重新获得 1,000 牌桌分</button>
           <QuickMessagePanel />
+          <ReportPanel />
           <RoomManagementPanel v-if="isOwner" @room-ended="router.push('/')" />
         </template>
       </aside>
