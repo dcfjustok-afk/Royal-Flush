@@ -57,6 +57,29 @@ test("跨设备登录会返回仍在等待的房间", async ({ page }, testInfo)
   await expect(page.locator(".room-signal")).toContainText("等待玩家准备");
 });
 
+test("积分账本短暂失败不会丢失账号登录状态", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1440", "代表性桌面项目覆盖账号核心状态降级恢复");
+  await page.route("**/api/v1/me", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      user: { id: "me", phone: "13800138000", nickname: "你", permissions: {}, banned: false, createdAt: "2026-08-24T12:00:00Z" },
+      balance: 1860,
+      activeRoomId: "",
+    }),
+  }));
+  await page.route("**/api/v1/me/score-ledger", (route) => route.fulfill({
+    status: 503,
+    contentType: "application/json",
+    body: JSON.stringify({ code: "temporarily_unavailable", message: "账本暂时不可用" }),
+  }));
+
+  await page.goto("/");
+  await expect(page.getByRole("link", { name: "账号：你" })).toBeVisible();
+  await expect(page.locator(".large-score")).toContainText("1,860");
+  await expect(page.locator(".lobby-heading").getByRole("link", { name: "创建牌局" })).toBeVisible();
+});
+
 test("断线的已准备玩家不会让房主误开局", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1440", "代表性桌面项目覆盖多人准备状态");
   const waiting = structuredClone(playerSnapshot);

@@ -64,12 +64,14 @@ export const useGameStore = defineStore("game", () => {
 
   async function refreshAccount() {
     if (!apiMode || !backendOnline.value) return;
+    const scoreLedgerRequest = api.scoreLedger().catch(() => null);
     try {
-      const [me, scoreLedger] = await Promise.all([api.me(), api.scoreLedger()]);
+      const me = await api.me();
       currentUser.value = me.user;
       accountPoints.value = me.balance;
       activeRoomId.value = me.activeRoomId ?? "";
-      ledger.value = scoreLedger.entries;
+      const scoreLedger = await scoreLedgerRequest;
+      if (scoreLedger) ledger.value = scoreLedger.entries;
       if (me.activeRoomId) await loadRoom(me.activeRoomId).catch(() => undefined);
     } catch (reason) {
       if (reason instanceof ApiError && reason.status === 401) {
