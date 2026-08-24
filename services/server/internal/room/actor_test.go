@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -250,6 +251,99 @@ func TestEmptyRoomJoinRollsBackWhenOwnerPersistenceFails(t *testing.T) {
 	if len(public.Players) != 0 || public.OwnerID != "" {
 		t.Fatalf("failed join left room state behind: %#v", public)
 	}
+}
+
+func TestManagerAcquiresRenewsAndReleasesRoomLease(t *testing.T) {
+	ctx := context.Background()
+	lease := &recordingLease{acquire: true}
+	manager := NewManagerWithInfrastructure(score.NewService(nil), nil, lease, "instance-a")
+	manager.emptyWait = 10 * time.Millisecond
+	manager.leaseTTL = 30 * time.Millisecond
+	manager.leaseRenew = 5 * time.Millisecond
+	actor, err := manager.Create(ctx, testConfig(), Identity{ID: "owner", Name: "房主"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(manager.Close)
+	time.Sleep(12 * time.Millisecond)
+	if lease.renewCount() == 0 {
+		t.Fatal("room lease was not renewed")
+	}
+	if _, _, err := actor.Handle(ctx, "owner", ClientCommand{Type: "room.leave", RequestID: "leave-leased-room"}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if lease.releaseCount() > 0 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("room lease was not released after empty-room expiry")
+}
+
+func TestManagerRejectsUnavailableLeaseAndClosesOnOwnershipLoss(t *testing.T) {
+	ctx := context.Background()
+	unavailable := &recordingLease{}
+	manager := NewManagerWithInfrastructure(score.NewService(nil), nil, unavailable, "instance-a")
+	if _, err := manager.Create(ctx, testConfig(), Identity{ID: "owner", Name: "房主"}); !errors.Is(err, ErrRoomLeaseUnavailable) {
+		t.Fatalf("expected unavailable lease error, got %v", err)
+	}
+
+	lost := &recordingLease{acquire: true, renewErr: ErrLeaseNotOwned}
+	manager = NewManagerWithInfrastructure(score.NewService(nil), nil, lost, "instance-a")
+	manager.leaseRenew = 5 * time.Millisecond
+	actor, err := manager.Create(ctx, testConfig(), Identity{ID: "owner", Name: "房主"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(manager.Close)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if _, ok := manager.Room(actor.ID); !ok {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("room remained active after lease ownership was lost")
+}
+
+type recordingLease struct {
+	mu       sync.Mutex
+	acquire  bool
+	renews   int
+	releases int
+	renewErr error
+}
+
+func (l *recordingLease) Acquire(context.Context, string, string, time.Duration) (bool, error) {
+	return l.acquire, nil
+}
+
+func (l *recordingLease) Renew(context.Context, string, string, time.Duration) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.renews++
+	return l.renewErr
+}
+
+func (l *recordingLease) Release(context.Context, string, string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.releases++
+	return nil
+}
+
+func (l *recordingLease) renewCount() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.renews
+}
+
+func (l *recordingLease) releaseCount() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.releases
 }
 
 func TestRaiseValidationVersionAndIdempotency(t *testing.T) {

@@ -6,9 +6,10 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/royal-flush/royal-flush/services/server/internal/room"
 )
 
-var ErrLeaseNotOwned = errors.New("room lease is not owned by this instance")
+var ErrLeaseNotOwned = room.ErrLeaseNotOwned
 
 type RoomLease struct {
 	client *redis.Client
@@ -23,6 +24,9 @@ func NewRoomLease(client *redis.Client, prefix string) *RoomLease {
 }
 
 func OpenRedis(redisURL string) (*redis.Client, error) {
+	if redisURL == "" {
+		return nil, errors.New("REDIS_URL is required")
+	}
 	options, err := redis.ParseURL(redisURL)
 	if err != nil {
 		return nil, err

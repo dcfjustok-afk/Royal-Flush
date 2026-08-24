@@ -9,12 +9,20 @@ import (
 	"github.com/royal-flush/royal-flush/services/server/internal/score"
 )
 
-var ErrAlreadySeated = errors.New("an account can occupy a seat in only one room")
+var (
+	ErrAlreadySeated        = errors.New("an account can occupy a seat in only one room")
+	ErrRoomLeaseUnavailable = errors.New("room lease is already owned by another server")
+)
 
 type Manager struct {
 	mu          sync.RWMutex
 	scores      AccountScores
 	store       Store
+	lease       Lease
+	instanceID  string
+	leaseTTL    time.Duration
+	leaseRenew  time.Duration
+	leaseStops  map[string]chan struct{}
 	rooms       map[string]*Actor
 	byCode      map[string]*Actor
 	activeSeat  map[string]string
@@ -27,7 +35,16 @@ func NewManager(scores AccountScores) *Manager {
 }
 
 func NewManagerWithStore(scores AccountScores, store Store) *Manager {
-	return &Manager{scores: scores, store: store, rooms: make(map[string]*Actor), byCode: make(map[string]*Actor), activeSeat: make(map[string]string), emptyTimers: make(map[string]*time.Timer), emptyWait: 30 * time.Minute}
+	return NewManagerWithInfrastructure(scores, store, nil, "")
+}
+
+func NewManagerWithInfrastructure(scores AccountScores, store Store, lease Lease, instanceID string) *Manager {
+	return &Manager{
+		scores: scores, store: store, lease: lease, instanceID: instanceID,
+		leaseTTL: 15 * time.Second, leaseRenew: 5 * time.Second, leaseStops: make(map[string]chan struct{}),
+		rooms: make(map[string]*Actor), byCode: make(map[string]*Actor), activeSeat: make(map[string]string),
+		emptyTimers: make(map[string]*time.Timer), emptyWait: 30 * time.Minute,
+	}
 }
 
 func (m *Manager) Create(ctx context.Context, config Config, owner Identity) (*Actor, error) {
@@ -40,12 +57,24 @@ func (m *Manager) Create(ctx context.Context, config Config, owner Identity) (*A
 	if err != nil {
 		return nil, err
 	}
+	if m.lease != nil {
+		acquired, err := m.lease.Acquire(ctx, actor.ID, m.instanceID, m.leaseTTL)
+		if err != nil {
+			actor.Close()
+			return nil, err
+		}
+		if !acquired {
+			actor.Close()
+			return nil, ErrRoomLeaseUnavailable
+		}
+	}
 	if m.store != nil {
 		err := m.store.CreateRoom(ctx, Record{
 			ID: actor.ID, Code: actor.Code, OwnerID: actor.OwnerID, Config: config,
 			Version: actor.version, CreatedAt: actor.CreatedAt,
 		})
 		if err != nil {
+			m.releaseLease(actor.ID)
 			actor.Close()
 			return nil, err
 		}
@@ -66,6 +95,7 @@ func (m *Manager) Create(ctx context.Context, config Config, owner Identity) (*A
 	m.rooms[actor.ID] = actor
 	m.byCode[actor.Code] = actor
 	m.activeSeat[owner.ID] = actor.ID
+	m.startLeaseRenewal(actor)
 	return actor, nil
 }
 
@@ -167,10 +197,12 @@ func (m *Manager) expireEmptyRoom(roomID string, actor *Actor) {
 		delete(m.byCode, actor.Code)
 	}
 	delete(m.emptyTimers, roomID)
+	m.stopLeaseRenewalLocked(roomID)
 	m.mu.Unlock()
 	if m.store != nil {
 		_ = m.store.EndRoom(context.Background(), roomID, time.Now().UTC())
 	}
+	m.releaseLease(roomID)
 	actor.Close()
 }
 
@@ -195,6 +227,9 @@ func (m *Manager) Close() {
 	for _, timer := range m.emptyTimers {
 		timer.Stop()
 	}
+	for roomID := range m.leaseStops {
+		m.stopLeaseRenewalLocked(roomID)
+	}
 	for _, actor := range m.rooms {
 		actors = append(actors, actor)
 	}
@@ -204,6 +239,83 @@ func (m *Manager) Close() {
 	m.emptyTimers = make(map[string]*time.Timer)
 	m.mu.Unlock()
 	for _, actor := range actors {
+		m.releaseLease(actor.ID)
 		actor.Close()
 	}
+}
+
+func (m *Manager) startLeaseRenewal(actor *Actor) {
+	if m.lease == nil {
+		return
+	}
+	stop := make(chan struct{})
+	m.leaseStops[actor.ID] = stop
+	go func() {
+		ticker := time.NewTicker(m.leaseRenew)
+		defer ticker.Stop()
+		failures := 0
+		for {
+			select {
+			case <-ticker.C:
+				ctx, cancel := context.WithTimeout(context.Background(), m.leaseRenew)
+				err := m.lease.Renew(ctx, actor.ID, m.instanceID, m.leaseTTL)
+				cancel()
+				if err == nil {
+					failures = 0
+					continue
+				}
+				if errors.Is(err, ErrLeaseNotOwned) {
+					m.expireLostLease(actor.ID, actor)
+					return
+				}
+				failures++
+				if failures >= 3 {
+					m.expireLostLease(actor.ID, actor)
+					return
+				}
+			case <-stop:
+				return
+			}
+		}
+	}()
+}
+
+func (m *Manager) expireLostLease(roomID string, actor *Actor) {
+	m.mu.Lock()
+	if m.rooms[roomID] != actor {
+		m.mu.Unlock()
+		return
+	}
+	delete(m.rooms, roomID)
+	if m.byCode[actor.Code] == actor {
+		delete(m.byCode, actor.Code)
+	}
+	for userID, activeRoomID := range m.activeSeat {
+		if activeRoomID == roomID {
+			delete(m.activeSeat, userID)
+		}
+	}
+	if timer := m.emptyTimers[roomID]; timer != nil {
+		timer.Stop()
+		delete(m.emptyTimers, roomID)
+	}
+	delete(m.leaseStops, roomID)
+	m.mu.Unlock()
+	actor.Close()
+}
+
+func (m *Manager) stopLeaseRenewalLocked(roomID string) {
+	if stop := m.leaseStops[roomID]; stop != nil {
+		close(stop)
+		delete(m.leaseStops, roomID)
+	}
+}
+
+func (m *Manager) releaseLease(roomID string) {
+	if m.lease == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = m.lease.Release(ctx, roomID, m.instanceID)
 }

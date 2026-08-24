@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/royal-flush/royal-flush/services/server/internal/httpapi"
+	"github.com/royal-flush/royal-flush/services/server/internal/idgen"
 	"github.com/royal-flush/royal-flush/services/server/internal/infra"
+	"github.com/royal-flush/royal-flush/services/server/internal/room"
 	"github.com/royal-flush/royal-flush/services/server/internal/voice"
 	"github.com/royal-flush/royal-flush/services/server/migrations"
 )
@@ -41,10 +43,44 @@ func main() {
 	} else {
 		logger.Warn("using in-memory persistence because DATABASE_URL is not configured")
 	}
+	redisURL := os.Getenv("REDIS_URL")
+	var roomLease room.Lease
+	var redisClient interface{ Close() error }
+	if redisURL != "" {
+		client, err := infra.OpenRedis(redisURL)
+		if err == nil {
+			startupContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			err = client.Ping(startupContext).Err()
+			cancel()
+		}
+		if err != nil {
+			logger.Error("redis initialization failed", "error", err)
+			os.Exit(1)
+		}
+		redisClient = client
+		roomLease = infra.NewRoomLease(client, "")
+		defer redisClient.Close()
+	} else if !development {
+		logger.Error("REDIS_URL is required outside development")
+		os.Exit(1)
+	} else {
+		logger.Warn("room leases are disabled because REDIS_URL is not configured")
+	}
+	instanceID := os.Getenv("INSTANCE_ID")
+	if instanceID == "" {
+		var err error
+		instanceID, err = idgen.ID("instance")
+		if err != nil {
+			logger.Error("instance id generation failed", "error", err)
+			os.Exit(1)
+		}
+	}
 	applicationConfig := httpapi.Config{
 		Development:    development,
 		AllowedOrigins: splitCSV(os.Getenv("ALLOWED_ORIGINS")),
 		Voice:          voice.Config{URL: os.Getenv("LIVEKIT_URL"), APIKey: os.Getenv("LIVEKIT_API_KEY"), APISecret: os.Getenv("LIVEKIT_API_SECRET")},
+		RoomLease:      roomLease,
+		InstanceID:     instanceID,
 	}
 	if database != nil {
 		applicationConfig.ScoreStore = database

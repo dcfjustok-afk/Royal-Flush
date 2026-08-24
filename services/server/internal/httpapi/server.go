@@ -25,6 +25,8 @@ type Config struct {
 	Voice          voice.Config
 	ScoreStore     score.Store
 	RoomStore      room.Store
+	RoomLease      room.Lease
+	InstanceID     string
 }
 
 type Server struct {
@@ -47,7 +49,7 @@ func New(config Config, logger *slog.Logger) *Server {
 	authService := auth.NewService(config.Development, nil)
 	scoreService := score.NewServiceWithStore(config.ScoreStore, nil)
 	server := &Server{config: config, log: logger, auth: authService, scores: scoreService}
-	server.rooms = room.NewManagerWithStore(scoreService, config.RoomStore)
+	server.rooms = room.NewManagerWithInfrastructure(scoreService, config.RoomStore, config.RoomLease, config.InstanceID)
 	server.router = server.routes()
 	return server
 }
