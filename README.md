@@ -53,7 +53,13 @@ docker compose up --build
 
 ## Zeabur 部署
 
-Zeabur 需要将 PostgreSQL、Redis、Go API、玩家端和运营端拆成五个服务，不能直接部署 `compose.yaml`。从构建计划预览开始的完整步骤、环境变量和首发限制见 [ZEABUR.md](ZEABUR.md)。
+Zeabur 需要将 PostgreSQL、Redis、Go API、玩家端和运营端拆成五个服务，不能直接部署 `compose.yaml`。三个源码服务关联同一个 GitHub 仓库的 `main` 分支，并通过独立 Watch Paths 按改动范围自动重部署。完整步骤、环境变量和首发限制见 [ZEABUR.md](ZEABUR.md)。
+
+## CI/CD
+
+GitHub Actions 会在 push 和 Pull Request 上执行 Go、Node、契约、Playwright 与容量检查，并汇总为 `Deployment gate`。生产流程要求保护 `main`：只有通过该检查的 Pull Request 才能合并；合并产生的 `main` push 由 Zeabur GitHub App 自动部署。该流程不需要在 GitHub Secrets 中保存 Zeabur API Key。
+
+Zeabur 三个服务的 Watch Paths 样例位于 `deploy/zeabur/watch-paths`。只修改后端时仅重建 `server`，只修改某个前端时仅重建对应服务；共享契约和 lockfile 变化会同时重建两个前端。
 
 ## 单独启动后端
 

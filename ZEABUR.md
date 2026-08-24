@@ -12,6 +12,34 @@
 
 Zeabur 当前不支持直接从 Docker Compose YAML 部署。仓库根目录的 `compose.yaml` 只用于本地完整栈，不能作为 Zeabur 的部署入口。
 
+## GitHub CI/CD 工作流
+
+正式部署使用 Zeabur 官方 GitHub App，不使用本地项目上传，也不在 GitHub Actions 中保存 Zeabur API Key。
+
+```mermaid
+flowchart LR
+  A[开发分支] --> B[Pull Request]
+  B --> C[GitHub Actions CI]
+  C -->|Deployment gate 通过| D[合并到 main]
+  D --> E[Zeabur GitHub App]
+  E --> F{Watch Paths}
+  F --> G[server]
+  F --> H[web]
+  F --> I[admin]
+```
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) 会执行 Go 测试与静态检查、Node 测试与构建、契约漂移检查、Playwright 流程和实时容量烟测。所有任务最终汇总为一个名为 `Deployment gate` 的检查。
+
+在 GitHub 仓库的 **Settings → Rules → Rulesets** 中为 `main` 创建规则：
+
+1. 要求通过 Pull Request 才能合并。
+2. 要求分支在合并前保持最新。
+3. 将 `Deployment gate` 设置为必需状态检查。
+4. 禁止 force push 和删除 `main`。
+5. 不允许管理员日常绕过该规则直接推送生产分支。
+
+Zeabur 的 GitHub 自动部署由 `main` 的 push 触发，并不会等待同一次 push 上刚启动的 GitHub Actions。因此质量门禁必须发生在 Pull Request 合并之前：CI 失败时不能进入 `main`；成功合并后，进入 `main` 的提交已经通过完整检查，Zeabur 才开始部署。
+
 ## 先处理当前构建预览
 
 如果当前页面显示以下自动识别结果，不要点击紫色“部署”按钮：
@@ -24,9 +52,9 @@ Build: npm run build
 Start: node index.js
 ```
 
-仓库没有根目录 `index.js`，这套计划无法启动项目。先关闭该预览，或进入“配置”添加 `ZBPACK_DOCKERFILE_NAME=server`。正确识别后，构建来源应是根目录的 `Dockerfile.server`，而不是 `node index.js`。
+仓库没有根目录 `index.js`，这套计划无法启动项目。关闭该预览，不再继续部署当前的 Local Project 服务。
 
-本地上传是一次性源码快照。仓库已经加入 Zeabur 构建文件和运营端登录，因此此前上传的旧快照不会自动更新。请使用当前仓库目录重新上传；后续若需要频繁发布，建议将同一仓库连接到三个 Zeabur 服务，让每次提交触发对应 Dockerfile 的重新构建。
+本地上传是一次性源码快照，不能形成持续部署。先将当前本地提交推送到 `https://github.com/dcfjustok-afk/Royal-Flush`，再到 Zeabur 的 **Account Settings → Integrations** 关联 GitHub，并在 GitHub 中安装 Zeabur App。安装时只授予该仓库访问权限即可。
 
 ## 1. 创建 PostgreSQL
 
@@ -47,7 +75,7 @@ Start: node index.js
 
 ## 3. 部署私有 Go 服务
 
-1. 使用更新后的本地目录创建一个源码服务。
+1. 选择“添加服务 → GitHub”，选择 `dcfjustok-afk/Royal-Flush` 仓库和 `main` 分支。
 2. 将服务名设为小写的 `server`。这个名称会生成供其他服务使用的 `SERVER_HOST`。
 3. 在服务变量中录入 [server.env.example](deploy/zeabur/server.env.example) 的内容。
 4. 将 `ADMIN_PHONES` 替换为实际运营手机号；多个号码使用英文逗号分隔，例如 `手机号A,手机号B`。
@@ -70,7 +98,7 @@ ENVIRONMENT=development
 
 ## 4. 部署玩家端
 
-1. 将同一个更新后的仓库目录再次上传，创建第二个源码服务。
+1. 再次选择“添加服务 → GitHub”，选择同一个仓库和 `main` 分支。
 2. 将服务名设为小写的 `web`。
 3. 在服务变量中录入 [web.env.example](deploy/zeabur/web.env.example) 的内容。
 4. 确认构建计划使用 `Dockerfile.web` 后部署。
@@ -87,7 +115,7 @@ API_UPSTREAM=http://${SERVER_HOST}:8080
 
 ## 5. 部署运营端
 
-1. 将同一个更新后的仓库目录第三次上传，创建第三个源码服务。
+1. 第三次选择“添加服务 → GitHub”，选择同一个仓库和 `main` 分支。
 2. 将服务名设为小写的 `admin`。
 3. 在服务变量中录入 [admin.env.example](deploy/zeabur/admin.env.example) 的内容。
 4. 确认构建计划使用 `Dockerfile.admin` 后部署。
@@ -96,7 +124,30 @@ API_UPSTREAM=http://${SERVER_HOST}:8080
 
 运营端首次打开时会要求手机号验证码登录。只有 `ADMIN_PHONES` 中的手机号能进入控制台；其他手机号即使通过验证码，也会停留在“没有运营权限”页面。玩家端和运营端域名不同，所以两边需要分别登录一次。
 
-## 6. 配置语音
+## 6. 配置按路径重部署
+
+三个 GitHub 服务创建完成后，分别进入 **Settings → Watch Paths**。Zeabur 默认值 `*` 会在仓库任意文件变化时重建服务，需要替换为仓库提供的精确路径：
+
+| Zeabur 服务 | 复制到 Watch Paths 的文件                          |
+| ----------- | -------------------------------------------------- |
+| `server`    | [server.txt](deploy/zeabur/watch-paths/server.txt) |
+| `web`       | [web.txt](deploy/zeabur/watch-paths/web.txt)       |
+| `admin`     | [admin.txt](deploy/zeabur/watch-paths/admin.txt)   |
+
+Watch Paths 使用类似 `.gitignore` 的格式，但含义相反：匹配表示触发部署。配置后的典型行为如下：
+
+| Git 变更                                     | 自动重新部署     |
+| -------------------------------------------- | ---------------- |
+| `services/server/**`                         | 仅 `server`      |
+| `apps/web/**`                                | 仅 `web`         |
+| `apps/admin/**`                              | 仅 `admin`       |
+| `packages/contracts/**`、`package-lock.json` | `web` 和 `admin` |
+| `.dockerignore`                              | 三个源码服务     |
+| `README.md`、`ZEABUR.md`、`.github/**`       | 不部署源码服务   |
+
+PostgreSQL 和 Redis 是独立数据服务，不关联 Git 仓库，也不会因为代码 push 被重建或清空。
+
+## 7. 配置语音
 
 首次部署可以把三个 `LIVEKIT_*` 变量留空。语音不可用不会阻止牌局继续，便于先验证身份、房间、积分和实时牌局。
 
@@ -110,7 +161,7 @@ LIVEKIT_API_SECRET=你的-api-secret
 
 不要把真实密钥写进 Git。自托管 LiveKit 需要额外处理 WebSocket 信令、RTC TCP/UDP、外部 IP、TURN 和媒体端口范围，不适合作为这次 Zeabur 首发部署的一部分。
 
-## 7. 验收顺序
+## 8. 验收顺序
 
 按以下顺序验证，出现问题时更容易定位到具体服务：
 
@@ -121,6 +172,8 @@ LIVEKIT_API_SECRET=你的-api-secret
 5. 运营域名能使用 `ADMIN_PHONES` 中的号码登录，并看到用户、房间、举报和审计数据。
 6. 执行全站积分重置前填写原因并完成二次确认；活跃牌局不应中断。
 7. 配置 LiveKit Cloud 后，再验证麦克风授权、设备切换、房主禁言和语音断线降级。
+8. 合并一个只修改 `apps/web` 的测试 Pull Request，确认 CI 的 `Deployment gate` 通过后只有 `web` 产生新部署。
+9. 在 Zeabur 部署记录中确认 commit SHA 与 GitHub `main` 最新提交一致。
 
 ## 变量检查表
 
@@ -143,7 +196,9 @@ LIVEKIT_API_SECRET=你的-api-secret
 ## Zeabur 官方参考
 
 - [使用 Dockerfile 部署](https://zeabur.com/docs/en-US/deploy/methods/dockerfile)
-- [创建服务与本地上传](https://zeabur.com/docs/en-US/deploy/create/create-service)
+- [GitHub 集成与自动部署](https://zeabur.com/docs/en-US/deploy/methods/github-integration)
+- [Watch Paths](https://zeabur.com/docs/en-US/deploy/config/watch-paths)
+- [创建服务](https://zeabur.com/docs/en-US/deploy/create/create-service)
 - [环境变量与服务变量引用](https://zeabur.com/docs/en-US/deploy/config/environment-variables)
 - [私有网络](https://zeabur.com/docs/en-US/deploy/networking/private-networking)
 - [Monorepo 根目录配置](https://zeabur.com/docs/en-US/deploy/config/root-directory)
