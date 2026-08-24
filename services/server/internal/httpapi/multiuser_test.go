@@ -1,10 +1,15 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 	"github.com/royal-flush/royal-flush/services/server/internal/room"
 )
 
@@ -191,6 +196,33 @@ func TestJoiningAnotherRoomSwitchesMembershipAtomically(t *testing.T) {
 		t.Fatalf("failed switch did not preserve current room: %d: %s", response.StatusCode, readBody(response))
 	}
 	response.Body.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	baseWSURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/v1/rooms/" + firstRoomID
+	switcherHeaders := http.Header{"Cookie": []string{switcher.Cookie.String()}}
+	connections := make(map[string]*websocket.Conn)
+	for _, name := range []string{"room-tab-one", "room-tab-two"} {
+		connection, _, err := websocket.Dial(ctx, baseWSURL+"/events", &websocket.DialOptions{HTTPHeader: switcherHeaders})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer connection.CloseNow()
+		var initial room.Envelope
+		if err := wsjson.Read(ctx, connection, &initial); err != nil || initial.Type != "table.snapshot" {
+			t.Fatalf("%s initial event = %#v, err = %v", name, initial, err)
+		}
+		connections[name] = connection
+	}
+	voiceConnection, _, err := websocket.Dial(ctx, baseWSURL+"/voice-events", &websocket.DialOptions{HTTPHeader: switcherHeaders})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer voiceConnection.CloseNow()
+	var voiceInitial voiceServerEvent
+	if err := wsjson.Read(ctx, voiceConnection, &voiceInitial); err != nil || voiceInitial.Type != "voice.peers" {
+		t.Fatalf("voice initial event = %#v, err = %v", voiceInitial, err)
+	}
+	connections["voice"] = voiceConnection
 	response = request(t, client, http.MethodPost, server.URL+"/api/v1/rooms/"+secondRoomID+"/join", map[string]any{"seat": 1}, switcher.Headers)
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("switch target status = %d: %s", response.StatusCode, readBody(response))
@@ -199,6 +231,19 @@ func TestJoiningAnotherRoomSwitchesMembershipAtomically(t *testing.T) {
 	decodeResponse(t, response, &switched)
 	if switched.RoomID != secondRoomID || playerByID(t, switched, switcher.ID).Seat != 1 {
 		t.Fatalf("switch response points at wrong membership: %#v", switched)
+	}
+	for name, connection := range connections {
+		for {
+			var event any
+			err := wsjson.Read(ctx, connection, &event)
+			if err == nil {
+				continue
+			}
+			if status := websocket.CloseStatus(err); status != roomMembershipRevoked {
+				t.Fatalf("%s switch close status = %d, err = %v", name, status, err)
+			}
+			break
+		}
 	}
 	response = request(t, client, http.MethodGet, server.URL+"/api/v1/me", nil, switcher.Headers)
 	var me struct {
