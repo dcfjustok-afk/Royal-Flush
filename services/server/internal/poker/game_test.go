@@ -1,6 +1,7 @@
 package poker
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/cardrank/cardrank"
@@ -123,6 +124,32 @@ func TestCumulativeShortAllInsReopenRaise(t *testing.T) {
 	}
 	if game.CurrentBet != 200 || game.Actor != 0 || !game.CanRaise(0) {
 		t.Fatalf("cumulative short all-ins should reopen action: %s", game.DebugState())
+	}
+}
+
+func TestSingleShortAllInDoesNotReopenAnAllInRaise(t *testing.T) {
+	game, _ := NewGame(2, 5, 10)
+	game.Street = StreetPreflop
+	game.CurrentBet = 100
+	game.MinimumRaiseBy = 100
+	game.Actor = 1
+	game.pending = map[int]bool{0: true, 1: true}
+	game.actedAtBet = map[int]int64{0: 100}
+	game.deck = NewDeck()
+	game.Seats[0] = &Player{Seat: 0, UserID: "a", Stack: 500, StreetCommitted: 100, HandCommitted: 100, Hole: cards("Ah", "Kd")}
+	game.Seats[1] = &Player{Seat: 1, UserID: "b", Stack: 50, StreetCommitted: 100, HandCommitted: 100, Hole: cards("Qh", "Jd")}
+
+	if err := game.AllIn(1); err != nil {
+		t.Fatal(err)
+	}
+	if game.Actor != 0 || game.CanRaise(0) || game.CanAllIn(0) {
+		t.Fatalf("single short all-in incorrectly reopened raising: %s", game.DebugState())
+	}
+	if err := game.AllIn(0); !errors.Is(err, ErrIllegalAction) {
+		t.Fatalf("expected all-in re-raise to be rejected, got %v", err)
+	}
+	if err := game.CheckOrCall(0); err != nil {
+		t.Fatalf("calling the short raise should remain legal: %v", err)
 	}
 }
 

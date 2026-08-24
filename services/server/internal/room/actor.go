@@ -696,7 +696,7 @@ func (a *Actor) snapshot(userID string) TableSnapshot {
 			canCheck = toCall == 0
 			canCall = true
 			canRaise = a.game.CanRaise(localSeat)
-			canAllIn = player.Stack > 0
+			canAllIn = a.game.CanAllIn(localSeat)
 		}
 	}
 	return TableSnapshot{

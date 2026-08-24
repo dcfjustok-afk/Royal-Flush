@@ -273,6 +273,14 @@ func (g *Game) CanRaise(seat int) bool {
 	return !acted || g.CurrentBet-last >= g.MinimumRaiseBy
 }
 
+func (g *Game) CanAllIn(seat int) bool {
+	player := g.player(seat)
+	if player == nil || seat != g.Actor || !g.canAct(player) || player.Stack <= 0 {
+		return false
+	}
+	return player.Stack <= g.ToCall(seat) || g.CanRaise(seat)
+}
+
 func (g *Game) CheckOrCall(seat int) error {
 	player, err := g.requireActor(seat)
 	if err != nil {
@@ -325,7 +333,7 @@ func (g *Game) AllIn(seat int) error {
 	if err != nil {
 		return err
 	}
-	if player.Stack <= 0 {
+	if !g.CanAllIn(seat) {
 		return ErrIllegalAction
 	}
 	newTotal := player.StreetCommitted + player.Stack
