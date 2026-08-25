@@ -1052,3 +1052,7 @@ input::placeholder { color: #71807a; }
 @media (prefers-reduced-motion: reduce) {
   .button, .icon-button { transition: none; }
 }
+
+@media (max-height: 760px) and (min-width: 901px) {
+  .poker-table-shell { width: min(640px, 56vw); }
+}
