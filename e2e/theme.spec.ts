@@ -42,6 +42,44 @@ test("玩家端主题可切换、持久化且控件尺寸可用", async ({ page 
   await expectUsableControls(page);
 });
 
+test("大厅三套主题保持完整表面层级与响应式可用", async ({ page }, testInfo) => {
+  await mockPlayerApi(page);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+  const picker = page.getByLabel("界面主题").first();
+  const renderedThemes: string[] = [];
+
+  for (const theme of ["obsidian", "ivory", "midnight"] as const) {
+    await picker.selectOption(theme);
+    await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+    await expect(page.locator(".standby-room-band")).toContainText("牌局待命");
+    await expect(page.locator(".standby-statuses")).toContainText("牌局服务");
+    await expect(page.locator(".activity-strip li")).toHaveCount(3);
+    await expectNoPageOverflow(page);
+    await expectUsableControls(page);
+
+    renderedThemes.push(await page.locator(".lobby-page").evaluate((lobby) => {
+      const style = (selector: string) => getComputedStyle(document.querySelector(selector)!);
+      return JSON.stringify({
+        page: getComputedStyle(lobby).color,
+        header: style(".app-header").backgroundColor,
+        standby: style(".standby-room-band").backgroundColor,
+        form: style(".join-form").backgroundColor,
+        input: style("#room-code").backgroundColor,
+        action: style(".join-form .button.primary").backgroundColor,
+      });
+    }));
+
+    if (testInfo.project.name === "desktop-1440") {
+      await expect(page).toHaveScreenshot(`lobby-${theme}.png`, { fullPage: true });
+    } else if (theme === "obsidian") {
+      await expect(page).toHaveScreenshot("lobby-responsive.png", { fullPage: true });
+    }
+  }
+
+  expect(new Set(renderedThemes).size).toBe(3);
+});
+
 test("运营端主题和窄屏布局保持可用", async ({ page }) => {
   await mockAdminApi(page);
   await page.goto("http://127.0.0.1:43174");
