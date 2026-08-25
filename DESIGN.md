@@ -2,20 +2,20 @@
 name: "Royal Flush"
 description: "A private poker room presented as a calm late-night score broadcast."
 colors:
-  ground: "#11110F"
-  ground-raised: "#161714"
-  panel: "#1D1E1B"
-  panel-raised: "#252622"
-  table: "#292A26"
-  bone: "#F2EFE8"
-  muted: "#AAA89F"
-  faint: "#73756D"
-  seam: "#3B3C37"
-  seam-soft: "#2C2D29"
-  action: "#E45445"
-  voice: "#73C6A0"
-  waiting: "#E0B14E"
-  focus: "#B9E5D1"
+  ground: "#0D1112"
+  ground-raised: "#141A1B"
+  panel: "#1B2323"
+  panel-raised: "#25302F"
+  table: "#263431"
+  bone: "#F4F0E8"
+  muted: "#B1B8B1"
+  faint: "#77837D"
+  seam: "#3A4945"
+  seam-soft: "#293633"
+  action: "#ED6A58"
+  voice: "#80D3AD"
+  waiting: "#EFBD63"
+  focus: "#B8ECD4"
 typography:
   display:
     fontFamily: "'Barlow Condensed', 'Arial Narrow', sans-serif"
@@ -87,7 +87,7 @@ components:
     rounded: "{rounded.control}"
     size: "38px"
   text-input:
-    backgroundColor: "#151613"
+    backgroundColor: "#111819"
     textColor: "{colors.bone}"
     rounded: "{rounded.control}"
     padding: "0 13px"
@@ -98,19 +98,19 @@ components:
     padding: "0 28px"
     height: "68px"
   system-broadcast:
-    backgroundColor: "#271C19"
-    textColor: "#E8D1CB"
+    backgroundColor: "#241A19"
+    textColor: "#EFD5CD"
     padding: "0 28px"
     height: "44px"
   player-station:
-    backgroundColor: "#1B1C19"
+    backgroundColor: "#182321"
     textColor: "{colors.bone}"
     rounded: "{rounded.station}"
     padding: "8px 9px"
     width: "152px"
     height: "64px"
   physical-chip:
-    backgroundColor: "#4C4E48"
+    backgroundColor: "#42514B"
     textColor: "#FFFFFF"
     rounded: "{rounded.round}"
     size: "52px"
@@ -132,7 +132,7 @@ components:
 
 ## Overview
 
-**Creative North Star: "深夜电台记分台"**
+**Creative North Star: "深夜电台记分台 · 静音控制室"**
 
 Royal Flush behaves like a calm event scorekeeper sharing a desk with a warm late-night radio host. A private poker room is presented as a live score broadcast: operational, quiet, precise, and social, with no casino glamour and no suggestion of money or prizes.
 
@@ -150,26 +150,26 @@ Warm graphite equipment, bone-white cards, vermilion action signals, mint voice 
 The palette is warm, low-chroma, and equipment-like; its three chromatic accents carry distinct operational meaning.
 
 ### Primary
-- **Action Vermilion** (`#E45445`): confirms raises, marks the active turn, underlines active navigation, and identifies score-changing events. It is a command signal, not a general brand wash.
+- **Action Vermilion** (`#ED6A58`): confirms raises, marks the active turn, underlines active navigation, and identifies score-changing events. It is a command signal, not a general brand wash.
 
 ### Secondary
-- **Voice Mint** (`#73C6A0`): identifies speaking, connected voice, healthy service state, selected media controls, and successful operations.
-- **Focus Mint** (`#B9E5D1`): provides the high-contrast two-pixel keyboard focus outline without adding a glow.
+- **Voice Mint** (`#80D3AD`): identifies speaking, connected voice, healthy service state, selected media controls, and successful operations.
+- **Focus Mint** (`#B8ECD4`): provides the high-contrast two-pixel keyboard focus outline without adding a glow.
 
 ### Tertiary
-- **Waiting Amber** (`#E0B14E`): marks reconnecting, pending, caution, incomplete setup, and all-in availability. It never substitutes for destructive vermilion or healthy mint.
+- **Waiting Amber** (`#EFBD63`): marks reconnecting, pending, caution, incomplete setup, and all-in availability. It never substitutes for destructive vermilion or healthy mint.
 
 ### Neutral
-- **Warm Graphite** (`#11110F`): the application ground and dominant surround.
-- **Raised Graphite** (`#161714`): station headers, table docks, sidebars, and drawers lifted one tonal step from the ground.
-- **Equipment Panel** (`#1D1E1B`): controls, player-adjacent tools, summary cells, and compact work surfaces.
-- **Raised Equipment Panel** (`#252622`): selected segments and secondary panel states.
-- **Table Surface** (`#292A26`): the authoritative play field and related table geometry.
-- **Bone White** (`#F2EFE8`): primary copy, face-up cards, light command controls, and the highest-priority values.
-- **Muted Copy** (`#AAA89F`): secondary labels, explanatory copy, and inactive navigation.
-- **Faint Copy** (`#73756D`): timestamps, empty states, inactive signals, and low-priority metadata.
-- **Equipment Seam** (`#3B3C37`): the standard one-pixel boundary between adjacent instruments.
-- **Soft Seam** (`#2C2D29`): dividers inside logs, lists, and low-emphasis groups.
+- **Warm Graphite** (`#0D1112`): the application ground and dominant surround.
+- **Raised Graphite** (`#141A1B`): station headers, table docks, sidebars, and drawers lifted one tonal step from the ground.
+- **Equipment Panel** (`#1B2323`): controls, player-adjacent tools, summary cells, and compact work surfaces.
+- **Raised Equipment Panel** (`#25302F`): selected segments and secondary panel states.
+- **Table Surface** (`#263431`): the authoritative play field and related table geometry.
+- **Bone White** (`#F4F0E8`): primary copy, face-up cards, light command controls, and the highest-priority values.
+- **Muted Copy** (`#B1B8B1`): secondary labels, explanatory copy, and inactive navigation.
+- **Faint Copy** (`#77837D`): timestamps, empty states, inactive signals, and low-priority metadata.
+- **Equipment Seam** (`#3A4945`): the standard one-pixel boundary between adjacent instruments.
+- **Soft Seam** (`#293633`): dividers inside logs, lists, and low-emphasis groups.
 
 **The Signal, Never Wash Rule.** Vermilion means committed or urgent action, mint means voice, connection, or success, and amber means waiting or caution; none of them becomes a decorative page tint.
 
@@ -244,7 +244,7 @@ The table is the only large organic silhouette. Its responsive ellipse may tight
 - **Internal Padding:** compact stations use `8px 9px`; larger panels generally use `20–24px`.
 
 ### Inputs / Fields
-- **Style:** a dark recessed field (`#151613`), one-pixel Equipment Seam, `4px` corners, `46px` minimum height, and Bone White text.
+- **Style:** a dark recessed field (`#111819`), one-pixel Equipment Seam, `6px` corners, `46px` minimum height, and Bone White text.
 - **Focus:** border and one-pixel inner outline shift to Voice Mint; the global Focus Mint keyboard outline remains visible where applicable.
 - **Error / Disabled:** errors use softened vermilion copy and explicit text; disabled fields and controls reduce contrast without disappearing.
 
