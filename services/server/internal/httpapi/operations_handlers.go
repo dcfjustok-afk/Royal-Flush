@@ -1,14 +1,18 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/go-chi/chi/v5"
+	"github.com/royal-flush/royal-flush/services/server/internal/auth"
 	"github.com/royal-flush/royal-flush/services/server/internal/operations"
+	"github.com/royal-flush/royal-flush/services/server/internal/requestid"
 	"github.com/royal-flush/royal-flush/services/server/internal/room"
 )
 
@@ -24,7 +28,7 @@ func (s *Server) createReport(writer http.ResponseWriter, request *http.Request)
 		writeProblem(writer, http.StatusBadRequest, "invalid_json", "举报内容格式不正确")
 		return
 	}
-	if !validReportCategory(input.Category) || len([]rune(strings.TrimSpace(input.Detail))) < 2 || len([]rune(input.Detail)) > 1000 || input.RequestID == "" {
+	if !validReportCategory(input.Category) || len([]rune(strings.TrimSpace(input.Detail))) < 2 || len([]rune(input.Detail)) > 1000 || !requestid.Valid(input.RequestID) {
 		writeProblem(writer, http.StatusBadRequest, "invalid_report", "请选择举报类型并填写 2 至 1000 字的说明")
 		return
 	}
@@ -93,7 +97,7 @@ func (s *Server) adminSetUserBanned(writer http.ResponseWriter, request *http.Re
 		writeProblem(writer, http.StatusBadRequest, "cannot_ban_self", "管理员不能封禁自己的账号")
 		return
 	}
-	if input.RequestID == "" || strings.TrimSpace(input.Reason) == "" {
+	if !requestid.Valid(input.RequestID) || strings.TrimSpace(input.Reason) == "" {
 		writeProblem(writer, http.StatusBadRequest, "reason_required", "必须填写原因并提供 requestId")
 		return
 	}
@@ -102,7 +106,13 @@ func (s *Server) adminSetUserBanned(writer http.ResponseWriter, request *http.Re
 		writeDomainError(writer, err)
 		return
 	}
-	s.auth.SetBanned(userID, input.Banned)
+	if input.Banned {
+		s.realtime.disconnectUser(userID, websocket.StatusPolicyViolation, "account session revoked")
+	}
+	if err := s.auth.SetBanned(request.Context(), userID, input.Banned); err != nil && !errors.Is(err, auth.ErrUserNotFound) {
+		writeProblem(writer, http.StatusServiceUnavailable, "identity_store_unavailable", "用户状态暂时无法同步")
+		return
+	}
 	writeJSON(writer, http.StatusOK, map[string]any{"user": user, "duplicate": duplicate})
 }
 
@@ -157,7 +167,7 @@ func (s *Server) adminHandleReport(writer http.ResponseWriter, request *http.Req
 		writeProblem(writer, http.StatusBadRequest, "invalid_json", "举报处理格式不正确")
 		return
 	}
-	if input.RequestID == "" || strings.TrimSpace(input.Reason) == "" {
+	if !requestid.Valid(input.RequestID) || strings.TrimSpace(input.Reason) == "" {
 		writeProblem(writer, http.StatusBadRequest, "reason_required", "必须填写处理原因并提供 requestId")
 		return
 	}

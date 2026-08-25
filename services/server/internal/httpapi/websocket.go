@@ -30,6 +30,8 @@ func (s *Server) roomEvents(writer http.ResponseWriter, request *http.Request) {
 	connection.SetReadLimit(1 << 20)
 	ctx, cancel := context.WithCancel(request.Context())
 	defer cancel()
+	unregister := s.realtime.add(user.ID, connection)
+	defer unregister()
 	if err := actor.PlayerConnected(ctx, user.ID); err != nil {
 		_ = connection.Close(websocket.StatusPolicyViolation, "player is not seated")
 		return
@@ -79,12 +81,17 @@ func (s *Server) roomEvents(writer http.ResponseWriter, request *http.Request) {
 			}
 			event, duplicate, err := actor.Handle(ctx, user.ID, command)
 			if err != nil {
-				problem := room.Envelope{Type: "error", RequestID: command.RequestID, RoomID: actor.ID, Version: snapshot.Version, Payload: map[string]any{"message": err.Error()}}
+				status, code, message := domainErrorProblem(err)
+				if status == http.StatusInternalServerError {
+					s.log.Error("unhandled WebSocket domain error", "error", err)
+				}
+				problem := room.Envelope{Type: "error", RequestID: command.RequestID, RoomID: actor.ID, Version: snapshot.Version, Payload: map[string]any{"code": code, "message": message}}
 				if wsjson.Write(ctx, connection, problem) != nil {
 					return
 				}
 				continue
 			}
+			s.disconnectDepartedUsers(event)
 			if duplicate && wsjson.Write(ctx, connection, event) != nil {
 				return
 			}

@@ -23,6 +23,8 @@ paths:
   /auth/otp/request:
     post:
       operationId: requestOtp
+      description: 仅用于本地开发兼容；生产账号使用手机号与密码。
+      security: []
       requestBody:
         required: true
         content:
@@ -45,9 +47,11 @@ paths:
                   expiresAt: { type: string, format: date-time }
                   expiresIn: { type: integer, const: 300 }
                   devCode: { type: string, pattern: '^[0-9]{6}$' }
+        '503': { $ref: '#/components/responses/Problem' }
   /auth/otp/verify:
     post:
       operationId: verifyOtp
+      security: []
       requestBody:
         required: true
         content:
@@ -71,9 +75,70 @@ paths:
                 properties:
                   user: { $ref: '#/components/schemas/User' }
                   balance: { type: integer, format: int64 }
+  /auth/register:
+    post:
+      operationId: registerAccount
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [phone, password, nickname]
+              properties:
+                phone: { type: string, pattern: '^1[3-9][0-9]{9}$' }
+                password: { type: string, minLength: 8, maxLength: 72 }
+                nickname: { type: string, minLength: 1, maxLength: 20 }
+      responses:
+        '201':
+          description: 注册成功并建立持久会话
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResult' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /auth/login:
+    post:
+      operationId: loginAccount
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [phone, password]
+              properties:
+                phone: { type: string, pattern: '^1[3-9][0-9]{9}$' }
+                password: { type: string, minLength: 1, maxLength: 72 }
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResult' }
+        '401': { $ref: '#/components/responses/Problem' }
+  /auth/logout:
+    post:
+      operationId: logoutAccount
+      security: []
+      responses:
+        '200':
+          description: 当前会话已注销
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean, const: true }
   /auth/password/login:
     post:
       operationId: loginWithPassword
+      security: []
       requestBody:
         required: true
         content:
@@ -111,6 +176,31 @@ paths:
                   user: { $ref: '#/components/schemas/User' }
                   balance: { type: integer, format: int64 }
                   activeRoomId: { type: string }
+    patch:
+      operationId: updateMe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [nickname]
+              properties:
+                nickname: { type: string, minLength: 1, maxLength: 20 }
+      responses:
+        '200':
+          description: 账号资料已更新
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user, balance, activeRoomId]
+                properties:
+                  user: { $ref: '#/components/schemas/User' }
+                  balance: { type: integer, format: int64 }
+                  activeRoomId: { type: string }
+        '400': { $ref: '#/components/responses/Problem' }
   /me/score-additions:
     post:
       operationId: addScore
@@ -256,7 +346,7 @@ paths:
       operationId: createVoiceToken
       responses:
         '200':
-          description: LiveKit 凭证或明确的禁用回退
+          description: LiveKit 凭证或浏览器 WebRTC 降级配置
           content:
             application/json:
               schema:
@@ -264,10 +354,25 @@ paths:
                 required: [enabled]
                 properties:
                   enabled: { type: boolean }
+                  transport: { type: string, enum: [livekit, webrtc] }
                   url: { type: string }
                   accessToken: { type: string }
+                  iceServers:
+                    type: array
+                    items: { $ref: '#/components/schemas/ICEServer' }
                   expiresAt: { type: string, format: date-time }
                   reason: { type: string }
+  /rooms/{roomID}/voice-events:
+    parameters:
+      - $ref: '#/components/parameters/RoomID'
+    get:
+      operationId: connectVoiceEvents
+      description: 将已登录且已入座的用户升级到 WebSocket，转发 WebRTC SDP 与 ICE 信令。
+      responses:
+        '101':
+          description: WebSocket 已建立
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
   /reports:
     post:
       operationId: createReport
@@ -503,6 +608,22 @@ components:
           additionalProperties: { type: boolean }
         banned: { type: boolean }
         createdAt: { type: string, format: date-time }
+    AuthResult:
+      type: object
+      required: [user, balance]
+      properties:
+        user: { $ref: '#/components/schemas/User' }
+        balance: { type: integer, format: int64 }
+    ICEServer:
+      type: object
+      required: [urls]
+      properties:
+        urls:
+          type: array
+          minItems: 1
+          items: { type: string }
+        username: { type: string }
+        credential: { type: string }
     RoomConfig:
       type: object
       additionalProperties: false

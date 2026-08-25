@@ -6,6 +6,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/royal-flush/royal-flush/services/server/internal/requestid"
 )
 
 const (
@@ -16,7 +18,7 @@ const (
 var (
 	ErrInvalidAmount = errors.New("amount must be an integer between 1 and 1,000,000,000")
 	ErrRateLimited   = errors.New("score addition is limited to once every 5 seconds")
-	ErrRequestID     = errors.New("requestId is required")
+	ErrRequestID     = errors.New("requestId is missing or invalid")
 	ErrSessionID     = errors.New("seat session id is required")
 )
 
@@ -126,7 +128,7 @@ func (s *Service) Balance(userID string) int64 {
 }
 
 func (s *Service) Add(userID, roomID, requestID string, amount int64) (Result, error) {
-	if requestID == "" {
+	if !requestid.Valid(requestID) {
 		return Result{}, ErrRequestID
 	}
 	if amount < 1 || amount > MaximumAddition {
@@ -181,7 +183,7 @@ func (s *Service) ResetAll(administrator, reason string) (Epoch, error) {
 }
 
 func (s *Service) ResetAllWithRequest(administrator, reason, requestID string) (Epoch, bool, error) {
-	if requestID == "" {
+	if !requestid.Valid(requestID) {
 		return Epoch{}, false, ErrRequestID
 	}
 	if s.store != nil {

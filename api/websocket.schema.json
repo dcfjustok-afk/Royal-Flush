@@ -86,7 +86,7 @@
         "type": {
           "type": "string",
           "enum": [
-            "table.snapshot", "room.player_joined", "room.player_disconnected", "room.player_reconnected", "room.ready_changed", "room.player_leaving", "room.player_removed",
+            "table.snapshot", "room.player_joined", "room.player_disconnected", "room.player_reconnected", "room.player_profile_updated", "room.ready_changed", "room.player_leaving", "room.player_removed",
             "room.table_points_refilled", "room.quick_message", "room.invite_rotated",
             "room.owner_transferred", "room.ended", "game.hand_started", "game.action_applied",
             "game.action_timed_out", "score.self_added", "score.global_reset",

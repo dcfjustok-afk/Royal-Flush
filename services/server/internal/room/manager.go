@@ -3,9 +3,11 @@ package room
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
+	"github.com/royal-flush/royal-flush/services/server/internal/idgen"
 	"github.com/royal-flush/royal-flush/services/server/internal/score"
 )
 
@@ -15,19 +17,27 @@ var (
 )
 
 type Manager struct {
-	mu          sync.RWMutex
-	scores      AccountScores
-	store       Store
-	lease       Lease
-	instanceID  string
-	leaseTTL    time.Duration
-	leaseRenew  time.Duration
-	leaseStops  map[string]chan struct{}
-	rooms       map[string]*Actor
-	byCode      map[string]*Actor
-	activeSeat  map[string]string
-	emptyTimers map[string]*time.Timer
-	emptyWait   time.Duration
+	mu             sync.RWMutex
+	transitionMu   sync.Mutex
+	scores         AccountScores
+	store          Store
+	lease          Lease
+	instanceID     string
+	leaseTTL       time.Duration
+	leaseRenew     time.Duration
+	leaseStops     map[string]chan struct{}
+	rooms          map[string]*Actor
+	byCode         map[string]*Actor
+	activeSeat     map[string]string
+	emptyTimers    map[string]*time.Timer
+	emptyWait      time.Duration
+	onSeatReleased func(string)
+}
+
+func (m *Manager) SetSeatReleasedHook(hook func(string)) {
+	m.mu.Lock()
+	m.onSeatReleased = hook
+	m.mu.Unlock()
 }
 
 func NewManager(scores AccountScores) *Manager {
@@ -70,13 +80,34 @@ func (m *Manager) Create(ctx context.Context, config Config, owner Identity) (*A
 	}
 	if m.store != nil {
 		ownerPlayer := actor.game.Seats[0]
-		err := m.store.CreateRoom(ctx, Record{
+		record := Record{
 			ID: actor.ID, Code: actor.Code, OwnerID: actor.OwnerID, Config: config,
 			Version: actor.version, CreatedAt: actor.CreatedAt,
-		}, SeatRecord{
+		}
+		ownerSeat := SeatRecord{
 			ID: ownerPlayer.SeatSessionID, RoomID: actor.ID, UserID: ownerPlayer.UserID, Seat: ownerPlayer.Seat,
 			AllocatedPoints: ownerPlayer.Allocated, JoinedAt: actor.CreatedAt,
-		})
+		}
+		if atomicStore, ok := m.store.(AtomicCreateStateStore); ok {
+			state, stateErr := actor.PersistentState(ctx)
+			if stateErr != nil {
+				err = stateErr
+			} else {
+				err = atomicStore.CreateRoomAndSaveState(ctx, record, ownerSeat, state)
+			}
+		} else {
+			err = m.store.CreateRoom(ctx, record, ownerSeat)
+			if err == nil {
+				if stateStore, ok := m.store.(StateStore); ok {
+					state, stateErr := actor.PersistentState(ctx)
+					if stateErr != nil {
+						err = stateErr
+					} else {
+						err = stateStore.SaveRoomState(ctx, state)
+					}
+				}
+			}
+		}
 		if err != nil {
 			m.releaseLease(actor.ID)
 			actor.Close()
@@ -84,18 +115,6 @@ func (m *Manager) Create(ctx context.Context, config Config, owner Identity) (*A
 		}
 	}
 	m.configureActor(actor)
-	if stateStore, ok := m.store.(StateStore); ok {
-		state, err := actor.PersistentState(ctx)
-		if err == nil {
-			err = stateStore.SaveRoomState(ctx, state)
-		}
-		if err != nil {
-			_ = m.store.EndRoom(context.Background(), actor.ID, time.Now().UTC())
-			m.releaseLease(actor.ID)
-			actor.Close()
-			return nil, err
-		}
-	}
 	m.rooms[actor.ID] = actor
 	m.byCode[actor.Code] = actor
 	m.activeSeat[owner.ID] = actor.ID
@@ -109,10 +128,16 @@ func (m *Manager) configureActor(actor *Actor) {
 		if m.store == nil {
 			return nil
 		}
+		if _, ok := m.store.(StateStore); ok {
+			return nil
+		}
 		return m.store.UpdateRoomOwner(context.Background(), actor.ID, ownerID)
 	}
 	actor.onRoomEnded = func() error {
 		if m.store == nil {
+			return nil
+		}
+		if _, ok := m.store.(StateStore); ok {
 			return nil
 		}
 		return m.store.EndRoom(context.Background(), actor.ID, time.Now().UTC())
@@ -123,27 +148,46 @@ func (m *Manager) configureActor(actor *Actor) {
 		}
 		return m.store.OpenSeat(context.Background(), seat, claimOwnership)
 	}
+	actor.onJoin = func(seat SeatRecord, claimOwnership bool, actorUserID string, event Envelope, state PersistentState) error {
+		if m.store == nil {
+			return nil
+		}
+		if atomicStore, ok := m.store.(AtomicJoinStore); ok {
+			return atomicStore.OpenSeatAndAppendRoomEventAndState(context.Background(), seat, claimOwnership, actorUserID, event, state)
+		}
+		if err := m.store.OpenSeat(context.Background(), seat, claimOwnership); err != nil {
+			return err
+		}
+		return m.persistEvent(actorUserID, event, state)
+	}
 	actor.onSeatRefilled = func(seatSessionID string, amount int64) error {
 		if m.store == nil {
+			return nil
+		}
+		if _, ok := m.store.(AtomicStateStore); ok {
 			return nil
 		}
 		return m.store.AddSeatAllocation(context.Background(), seatSessionID, amount)
 	}
 	actor.onEvent = func(actorUserID string, event Envelope, state PersistentState) error {
-		if m.store == nil {
-			return nil
-		}
-		if atomicStore, ok := m.store.(AtomicStateStore); ok {
-			return atomicStore.AppendRoomEventAndState(context.Background(), actorUserID, event, state)
-		}
-		if err := m.store.AppendRoomEvent(context.Background(), actorUserID, event); err != nil {
-			return err
-		}
-		if stateStore, ok := m.store.(StateStore); ok {
-			return stateStore.SaveRoomState(context.Background(), state)
-		}
+		return m.persistEvent(actorUserID, event, state)
+	}
+}
+
+func (m *Manager) persistEvent(actorUserID string, event Envelope, state PersistentState) error {
+	if m.store == nil {
 		return nil
 	}
+	if atomicStore, ok := m.store.(AtomicStateStore); ok {
+		return atomicStore.AppendRoomEventAndState(context.Background(), actorUserID, event, state)
+	}
+	if err := m.store.AppendRoomEvent(context.Background(), actorUserID, event); err != nil {
+		return err
+	}
+	if stateStore, ok := m.store.(StateStore); ok {
+		return stateStore.SaveRoomState(context.Background(), state)
+	}
+	return nil
 }
 
 func (m *Manager) Restore(ctx context.Context) error {
@@ -203,11 +247,10 @@ func (m *Manager) Restore(ctx context.Context) error {
 }
 
 func (m *Manager) Join(ctx context.Context, roomID string, identity Identity, seat int) (TableSnapshot, error) {
+	m.transitionMu.Lock()
+	defer m.transitionMu.Unlock()
 	m.mu.Lock()
-	if existing := m.activeSeat[identity.ID]; existing != "" && existing != roomID {
-		m.mu.Unlock()
-		return TableSnapshot{}, ErrAlreadySeated
-	}
+	existingRoomID := m.activeSeat[identity.ID]
 	actor := m.rooms[roomID]
 	if actor == nil {
 		actor = m.byCode[roomID]
@@ -216,12 +259,53 @@ func (m *Manager) Join(ctx context.Context, roomID string, identity Identity, se
 		m.mu.Unlock()
 		return TableSnapshot{}, errors.New("room not found")
 	}
-	m.cancelEmptyTimer(actor.ID)
-	if m.activeSeat[identity.ID] == actor.ID {
+	if existingRoomID == actor.ID {
 		m.mu.Unlock()
 		return actor.Snapshot(ctx, identity.ID)
 	}
+	var current *Actor
+	if existingRoomID != "" {
+		current = m.rooms[existingRoomID]
+	}
+	m.mu.Unlock()
+	if current != nil {
+		previousSeat, err := current.SeatForImmediateSwitch(ctx, identity.ID)
+		if err != nil {
+			return TableSnapshot{}, err
+		}
+		if err := actor.ReserveSeatForSwitch(ctx, identity.ID, seat); err != nil {
+			return TableSnapshot{}, err
+		}
+		defer actor.ReleaseSeatReservation(identity.ID, seat)
+		requestID, err := idgen.ID("switch")
+		if err != nil {
+			return TableSnapshot{}, err
+		}
+		if _, _, err := current.Handle(ctx, identity.ID, ClientCommand{Type: "room.leave", RequestID: requestID}); err != nil {
+			return TableSnapshot{}, err
+		}
+		m.mu.Lock()
+		m.activeSeat[identity.ID] = actor.ID
+		m.cancelEmptyTimer(actor.ID)
+		m.mu.Unlock()
+		snapshot, err := actor.Join(ctx, identity, seat)
+		if err == nil {
+			return snapshot, nil
+		}
+		m.releaseSeat(identity.ID)
+		m.mu.Lock()
+		m.activeSeat[identity.ID] = current.ID
+		m.cancelEmptyTimer(current.ID)
+		m.mu.Unlock()
+		if _, restoreErr := current.Join(ctx, identity, previousSeat); restoreErr != nil {
+			m.releaseSeat(identity.ID)
+			return TableSnapshot{}, fmt.Errorf("join target room: %w; restore previous room: %v", err, restoreErr)
+		}
+		return TableSnapshot{}, err
+	}
+	m.mu.Lock()
 	m.activeSeat[identity.ID] = actor.ID
+	m.cancelEmptyTimer(actor.ID)
 	m.mu.Unlock()
 	snapshot, err := actor.Join(ctx, identity, seat)
 	if err != nil {
@@ -327,7 +411,11 @@ func (m *Manager) releaseSeat(userID string) {
 		actor := m.rooms[roomID]
 		m.emptyTimers[roomID] = time.AfterFunc(m.emptyWait, func() { m.expireEmptyRoom(roomID, actor) })
 	}
+	hook := m.onSeatReleased
 	m.mu.Unlock()
+	if hook != nil {
+		hook(userID)
+	}
 }
 
 func (m *Manager) hasActiveSeatLocked(roomID string) bool {
@@ -370,8 +458,10 @@ func (m *Manager) updateRoomCode(actor *Actor, oldCode, newCode string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.store != nil {
-		if err := m.store.UpdateRoomCode(context.Background(), actor.ID, oldCode, newCode); err != nil {
-			return err
+		if _, ok := m.store.(StateStore); !ok {
+			if err := m.store.UpdateRoomCode(context.Background(), actor.ID, oldCode, newCode); err != nil {
+				return err
+			}
 		}
 	}
 	if m.byCode[oldCode] == actor {

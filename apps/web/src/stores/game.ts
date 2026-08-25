@@ -2,8 +2,8 @@ import type { ChipDenomination, RoomConfig, ScoreLedgerEntry, TableSnapshot } fr
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { emptyRoomConfig, emptySnapshot } from "@/data/empty";
-import { api, ApiError, apiMode } from "@/lib/api";
-import { VoiceController } from "@/lib/voice";
+import { api, ApiError, apiMode, isRoomMembershipRevokedClose, isSessionRevokedClose, type AccountUser } from "@/lib/api";
+import { VoiceController, type VoiceTransport } from "@/lib/voice";
 
 type Message = { id: string; type: string; text: string; at: string };
 export type RealtimeConnectionState = "offline" | "connecting" | "connected" | "reconnecting";
@@ -14,7 +14,7 @@ export function reconnectDelay(attempt: number) {
 
 export const useGameStore = defineStore("game", () => {
   const accountPoints = ref<number | null>(null);
-  const currentUser = ref<{ id: string; nickname: string } | null>(null);
+  const currentUser = ref<AccountUser | null>(null);
   const activeRoomId = ref("");
   const ledger = ref<ScoreLedgerEntry[]>([]);
   const roomConfig = ref<RoomConfig>(structuredClone(emptyRoomConfig));
@@ -22,6 +22,7 @@ export const useGameStore = defineStore("game", () => {
   const messages = ref<Message[]>([]);
   const microphoneEnabled = ref(false);
   const voiceConnected = ref(false);
+  const voiceTransport = ref<VoiceTransport | null>(null);
   const voiceError = ref("");
   const activeSpeakerId = ref<string | null>(null);
   const microphones = ref<Array<{ deviceId: string; label: string }>>([]);
@@ -44,6 +45,7 @@ export const useGameStore = defineStore("game", () => {
       activeSpeakerId.value = identity;
       for (const player of snapshot.value.players) player.isSpeaking = player.id === identity;
     },
+    transport: (transport) => (voiceTransport.value = transport),
     error: (message) => (voiceError.value = message),
   });
 
@@ -62,17 +64,28 @@ export const useGameStore = defineStore("game", () => {
 
   async function refreshAccount() {
     if (!apiMode || !backendOnline.value) return;
-    const [me, scoreLedger] = await Promise.all([api.me(), api.scoreLedger()]);
-    currentUser.value = me.user;
-    accountPoints.value = me.balance;
-    activeRoomId.value = me.activeRoomId ?? "";
-    ledger.value = scoreLedger.entries;
-    if (me.activeRoomId) await loadRoom(me.activeRoomId).catch(() => undefined);
+    const scoreLedgerRequest = api.scoreLedger().catch(() => null);
+    try {
+      const me = await api.me();
+      currentUser.value = me.user;
+      accountPoints.value = me.balance;
+      activeRoomId.value = me.activeRoomId ?? "";
+      const scoreLedger = await scoreLedgerRequest;
+      if (scoreLedger) ledger.value = scoreLedger.entries;
+      if (me.activeRoomId) await loadRoom(me.activeRoomId).catch(() => undefined);
+    } catch (reason) {
+      if (reason instanceof ApiError && reason.status === 401) {
+        clearAccount();
+        return;
+      }
+      throw reason;
+    }
   }
 
   function acceptSnapshot(next: TableSnapshot) {
     snapshot.value = structuredClone(next);
     roomConfig.value = structuredClone(next.config ?? { ...roomConfig.value, name: next.roomName, chipDenominations: [...next.allowedChipDenominations] });
+    connectionError.value = "";
     if (next.messages) {
       messages.value = next.messages.map((message) => ({
         id: message.id,
@@ -83,8 +96,11 @@ export const useGameStore = defineStore("game", () => {
     }
     const me = next.players.find((player) => player.isLocal);
     if (me) {
+      activeRoomId.value = next.roomId;
       accountPoints.value = me.accountPoints;
-      currentUser.value = { id: me.id, nickname: me.name };
+      currentUser.value = currentUser.value
+        ? { ...currentUser.value, id: me.id, nickname: me.name }
+        : { id: me.id, phone: "", nickname: me.name, permissions: {}, banned: false, createdAt: "" };
       if (me.isMuted && microphoneEnabled.value) {
         void voice.disableMicrophone();
         microphoneEnabled.value = false;
@@ -114,7 +130,9 @@ export const useGameStore = defineStore("game", () => {
   }
 
   async function joinRoom(idOrCode: string, seat: number) {
+    const previousRoomId = snapshot.value.roomId;
     const next = await api.joinRoom(idOrCode, seat);
+    if (previousRoomId && previousRoomId !== next.roomId) disconnectRoomEvents();
     acceptSnapshot(next);
     backendOnline.value = true;
     return next;
@@ -131,7 +149,16 @@ export const useGameStore = defineStore("game", () => {
     try {
       requireBackend();
       const result = await api.roomCommand(roomId, { type, payload, expectedVersion: snapshot.value.version, requestId: crypto.randomUUID() });
-      if (type !== "room.leave" && type !== "room.end") await loadRoom(roomId);
+      if (type !== "room.leave" && type !== "room.end") {
+        try {
+          await loadRoom(roomId);
+        } catch {
+          if (type === "room.ready" && typeof payload.ready === "boolean" && localPlayer.value) {
+            localPlayer.value.isReady = payload.ready;
+          }
+          connectionError.value = "操作已提交，正在恢复最新牌桌状态";
+        }
+      }
       return result.event;
     } catch (reason) {
       if (reason instanceof ApiError && reason.code === "version_conflict") {
@@ -146,6 +173,7 @@ export const useGameStore = defineStore("game", () => {
 
   function connectRoomEvents(roomId: string) {
     if (!apiMode || !backendOnline.value) return;
+    if (eventSocket && eventRoomId !== roomId) disconnectRoomEvents();
     shouldReconnect = true;
     eventRoomId = roomId;
     if (eventSocket && (eventSocket.readyState === WebSocket.OPEN || eventSocket.readyState === WebSocket.CONNECTING)) return;
@@ -189,9 +217,23 @@ export const useGameStore = defineStore("game", () => {
         refreshSnapshot();
       }
     });
-    socket.addEventListener("close", () => {
+    socket.addEventListener("close", (event) => {
       if (eventSocket !== socket) return;
       eventSocket = null;
+      if (isSessionRevokedClose(event.code)) {
+        shouldReconnect = false;
+        connectionState.value = "offline";
+        connectionError.value = "登录状态已失效，请重新登录";
+        clearAccount();
+        return;
+      }
+      if (isRoomMembershipRevokedClose(event.code)) {
+        shouldReconnect = false;
+        connectionState.value = "offline";
+        connectionError.value = "你已离开或被移出这个房间";
+        voice.disconnect();
+        return;
+      }
       if (!shouldReconnect) {
         connectionState.value = "offline";
         return;
@@ -216,6 +258,19 @@ export const useGameStore = defineStore("game", () => {
     socket?.close();
     connectionState.value = "offline";
     voice.disconnect();
+    microphoneEnabled.value = false;
+    activeSpeakerId.value = null;
+    voiceConnected.value = false;
+    voiceTransport.value = null;
+    for (const player of snapshot.value.players) player.isSpeaking = false;
+  }
+
+  function activeRoomRoute() {
+    const roomId = activeRoomId.value;
+    if (!roomId || snapshot.value.roomId !== roomId || !localPlayer.value) return "/";
+    return snapshot.value.street === "waiting"
+      ? `/rooms/${roomId}/waiting`
+      : `/rooms/${roomId}/table`;
   }
 
   async function addAccountPoints(amount: number) {
@@ -248,6 +303,14 @@ export const useGameStore = defineStore("game", () => {
       voiceError.value = "房主已将你的麦克风静音";
       return;
     }
+    if (!roomConfig.value.voiceEnabled) {
+      voiceError.value = "这个房间没有开启语音";
+      return;
+    }
+    if (!currentUser.value) {
+      voiceError.value = "请先登录账号再开启语音";
+      return;
+    }
     voiceBusy.value = true;
     try {
       if (microphoneEnabled.value) {
@@ -256,7 +319,7 @@ export const useGameStore = defineStore("game", () => {
         return;
       }
       requireBackend();
-      microphoneEnabled.value = await voice.enableMicrophone(snapshot.value.roomId);
+      microphoneEnabled.value = await voice.enableMicrophone(snapshot.value.roomId, currentUser.value.id);
       if (microphoneEnabled.value) await refreshMicrophones();
     } finally {
       voiceBusy.value = false;
@@ -287,6 +350,45 @@ export const useGameStore = defineStore("game", () => {
     }
   }
 
+  async function registerAccount(phone: string, password: string, nickname: string) {
+    requireBackend();
+    const result = await api.register(phone, password, nickname);
+    currentUser.value = result.user;
+    accountPoints.value = result.balance;
+    activeRoomId.value = "";
+    ledger.value = [];
+    await refreshAccount();
+  }
+
+  async function loginAccount(phone: string, password: string) {
+    requireBackend();
+    const result = await api.login(phone, password);
+    currentUser.value = result.user;
+    accountPoints.value = result.balance;
+    await refreshAccount();
+  }
+
+  async function updateNickname(nickname: string) {
+    requireBackend();
+    const result = await api.updateMe(nickname);
+    currentUser.value = result.user;
+    accountPoints.value = result.balance;
+    activeRoomId.value = result.activeRoomId ?? "";
+  }
+
+  async function logoutAccount() {
+    if (apiMode && backendOnline.value) await api.logout();
+    disconnectRoomEvents();
+    clearAccount();
+  }
+
+  function clearAccount() {
+    currentUser.value = null;
+    accountPoints.value = null;
+    activeRoomId.value = "";
+    ledger.value = [];
+  }
+
   async function raise(chips: ChipDenomination[]) {
     await sendCommand("action.raise", { chips });
   }
@@ -304,9 +406,9 @@ export const useGameStore = defineStore("game", () => {
   }
 
   return {
-    accountPoints, currentUser, activeRoomId, ledger, roomConfig, snapshot, messages, microphoneEnabled, voiceConnected, voiceError, activeSpeakerId, microphones, selectedMicrophoneId, voiceBusy,
+    accountPoints, currentUser, activeRoomId, ledger, roomConfig, snapshot, messages, microphoneEnabled, voiceConnected, voiceTransport, voiceError, activeSpeakerId, microphones, selectedMicrophoneId, voiceBusy,
     backendOnline, connectionState, connectionError, roomLoading, commandPending,
-    localPlayer, activePlayers, probeBackend, refreshAccount, acceptSnapshot, createRoom, loadRoom, joinRoom, sendCommand, connectRoomEvents, disconnectRoomEvents,
-    addAccountPoints, updateRoomConfig, toggleMicrophone, refreshMicrophones, selectMicrophone, raise, call, fold, allIn,
+    localPlayer, activePlayers, probeBackend, refreshAccount, activeRoomRoute, acceptSnapshot, createRoom, loadRoom, joinRoom, sendCommand, connectRoomEvents, disconnectRoomEvents,
+    addAccountPoints, updateRoomConfig, toggleMicrophone, refreshMicrophones, selectMicrophone, registerAccount, loginAccount, updateNickname, logoutAccount, raise, call, fold, allIn,
   };
 });

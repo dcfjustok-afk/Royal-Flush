@@ -8,17 +8,17 @@ import (
 	"time"
 )
 
-func TestDisabledVoiceFallsBack(t *testing.T) {
+func TestMissingLiveKitFallsBackToWebRTC(t *testing.T) {
 	token, err := (Config{}).Issue("u1", "小北", "room-1", time.Now())
-	if err != nil || token.Enabled || token.Reason == "" {
-		t.Fatalf("unexpected disabled response: %#v, %v", token, err)
+	if err != nil || !token.Enabled || token.Transport != "webrtc" || len(token.ICEServers) == 0 {
+		t.Fatalf("unexpected fallback response: %#v, %v", token, err)
 	}
 }
 
 func TestIssueLiveKitCompatibleClaims(t *testing.T) {
 	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
 	token, err := (Config{URL: "wss://voice.example.test", APIKey: "key", APISecret: "secret"}).Issue("u1", "小北", "room-1", now)
-	if err != nil || !token.Enabled {
+	if err != nil || !token.Enabled || token.Transport != "livekit" {
 		t.Fatal(err)
 	}
 	parts := strings.Split(token.AccessToken, ".")

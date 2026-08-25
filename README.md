@@ -4,7 +4,7 @@ Royal Flush 是面向熟人邀请组局的在线 No-Limit Texas Hold'em Web 项�
 
 ## 项目组成
 
-- `apps/web`：Vue 3 玩家端，覆盖邀请登录、房间大厅、等候室、牌桌、语音和个人账本。
+- `apps/web`：Vue 3 玩家端，覆盖账号注册登录、邀请入桌、房间大厅、牌桌语音和个人账本。
 - `apps/admin`：独立 Vue 3 运营端，覆盖用户、房间、举报、审计和全站积分重置。
 - `services/server`：Go 模块化单体，提供 REST、WebSocket、牌局状态机、积分账本和运营接口。
 - `packages/contracts`：由 OpenAPI 与 WebSocket JSON Schema 生成的共享类型。
@@ -73,6 +73,7 @@ $env:REDIS_URL='redis://localhost:6379/0'
 $env:LIVEKIT_URL='ws://localhost:7880'
 $env:LIVEKIT_API_KEY='devkey'
 $env:LIVEKIT_API_SECRET='secretsecretsecretsecretsecretsecret'
+$env:VOICE_ICE_URLS='stun:stun.l.google.com:19302'
 $env:ALLOWED_ORIGINS='http://localhost:5173,http://localhost:5174'
 $env:ADMIN_USER_IDS='local-admin'
 go run ./cmd/server
@@ -86,6 +87,12 @@ go run ./cmd/server
 - `GET /api/v1/ready`：验证启动时注册的 PostgreSQL 和 Redis 依赖仍然可用；依赖异常时返回 `503`。
 
 容器编排使用 `/api/v1/ready` 作为 Go 服务的 readiness gate，前端只会在后端就绪后启动。
+
+## 玩家账号与桌内语音
+
+玩家使用中国大陆手机号作为账号名，并用密码注册或登录。密码只保存 bcrypt 哈希；浏览器持有 30 天 HttpOnly 会话 Cookie，服务端仅在 PostgreSQL 保存会话令牌的 SHA-256 摘要。用户资料、封禁状态和会话都会跨服务重启保留，退出登录会立即撤销当前会话。
+
+语音优先使用配置好的 LiveKit。未配置 LiveKit 时，服务会自动发放同源 WebRTC 降级配置，并通过 `/api/v1/rooms/{roomID}/voice-events` 在已入座玩家之间转发 SDP/ICE 信令。默认 STUN 适合普通网络；正式环境建议在 `VOICE_ICE_URLS` 中追加 TURN URL，并设置 `VOICE_TURN_USERNAME`、`VOICE_TURN_CREDENTIAL`，以覆盖对称 NAT 或限制 UDP 的网络。语音媒体不经过 Go 服务，不录制、不保存、不转写。
 
 ## 验证命令
 
@@ -131,8 +138,8 @@ go run ./cmd/loadtest -connections 16 -rooms 4 -actions 4 -reconnects 4
 
 ## 当前运行边界
 
-- 非开发环境的短信验证码目前只生成挑战码，尚未接入真实短信服务商。
-- 登录 session 当前保存在单个 Go 进程内；多实例部署前需迁移到共享 session 存储。
+- OTP 接口仅保留给本地开发和旧流程兼容；玩家正式流程使用手机号与密码，仓库仍未接入短信服务商。
 - 运营端活跃房间列表来自当前服务实例；多实例运营视图需要增加跨实例聚合。
-- 语音不录制、不保存、不转写；LiveKit 或 TURN 不可用时不阻止继续打牌。
+- 浏览器 WebRTC 降级适合 2–8 人熟人桌；严格 NAT 环境需要 TURN，规模继续扩大时应使用 LiveKit。
+- 语音不录制、不保存、不转写；语音连接失败时不阻止继续打牌。
 - 上线前仍需完成 ICP、隐私政策、用户协议、手机号与语音个人信息处理、未成年人策略及非博彩边界专项合规审查。

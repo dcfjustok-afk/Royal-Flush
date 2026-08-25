@@ -12,6 +12,7 @@ onMounted(() => store.probeBackend());
 </script>
 
 <template>
+  <a class="skip-link" href="#main-content">跳转到主要内容</a>
   <RouterView />
   <LegalDisclaimer v-if="!immersive" />
 </template>

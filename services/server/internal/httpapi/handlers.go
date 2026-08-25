@@ -4,9 +4,13 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/go-chi/chi/v5"
+	"github.com/royal-flush/royal-flush/services/server/internal/auth"
 	"github.com/royal-flush/royal-flush/services/server/internal/operations"
+	"github.com/royal-flush/royal-flush/services/server/internal/requestid"
 	"github.com/royal-flush/royal-flush/services/server/internal/room"
+	"github.com/royal-flush/royal-flush/services/server/internal/voice"
 )
 
 func (s *Server) requestOTP(writer http.ResponseWriter, request *http.Request) {
@@ -39,7 +43,7 @@ func (s *Server) verifyOTP(writer http.ResponseWriter, request *http.Request) {
 		writeProblem(writer, http.StatusBadRequest, "invalid_json", "请求格式不正确")
 		return
 	}
-	user, token, err := s.auth.Verify(input.Phone, input.Code, input.Nickname)
+	user, token, err := s.auth.Verify(request.Context(), input.Phone, input.Code, input.Nickname)
 	if err != nil {
 		writeDomainError(writer, err)
 		return
@@ -49,11 +53,73 @@ func (s *Server) verifyOTP(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	s.scores.EnsureUser(user.ID)
-	http.SetCookie(writer, &http.Cookie{
-		Name: "rf_session", Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode,
-		Secure: !s.config.Development, MaxAge: int((30 * 24 * time.Hour).Seconds()),
-	})
+	s.setSessionCookie(writer, token)
 	writeJSON(writer, http.StatusOK, map[string]any{"user": user, "balance": s.scores.Balance(user.ID)})
+}
+
+func (s *Server) register(writer http.ResponseWriter, request *http.Request) {
+	var input struct {
+		Phone    string `json:"phone"`
+		Password string `json:"password"`
+		Nickname string `json:"nickname"`
+	}
+	if err := decodeJSON(request, &input); err != nil {
+		writeProblem(writer, http.StatusBadRequest, "invalid_json", "请求格式不正确")
+		return
+	}
+	user, token, err := s.auth.Register(request.Context(), input.Phone, input.Password, input.Nickname)
+	if err != nil {
+		writeDomainError(writer, err)
+		return
+	}
+	if err := s.persistIdentity(request, user); err != nil {
+		writeProblem(writer, http.StatusServiceUnavailable, "identity_store_unavailable", "用户资料暂时无法保存")
+		return
+	}
+	s.scores.EnsureUser(user.ID)
+	s.setSessionCookie(writer, token)
+	writeJSON(writer, http.StatusCreated, map[string]any{"user": user, "balance": s.scores.Balance(user.ID)})
+}
+
+func (s *Server) login(writer http.ResponseWriter, request *http.Request) {
+	var input struct {
+		Phone    string `json:"phone"`
+		Password string `json:"password"`
+	}
+	if err := decodeJSON(request, &input); err != nil {
+		writeProblem(writer, http.StatusBadRequest, "invalid_json", "请求格式不正确")
+		return
+	}
+	user, token, err := s.auth.Login(request.Context(), input.Phone, input.Password)
+	if err != nil {
+		writeDomainError(writer, err)
+		return
+	}
+	if err := s.persistIdentity(request, user); err != nil {
+		writeProblem(writer, http.StatusServiceUnavailable, "identity_store_unavailable", "用户资料暂时无法保存")
+		return
+	}
+	s.scores.EnsureUser(user.ID)
+	s.setSessionCookie(writer, token)
+	writeJSON(writer, http.StatusOK, map[string]any{"user": user, "balance": s.scores.Balance(user.ID)})
+}
+
+func (s *Server) logout(writer http.ResponseWriter, request *http.Request) {
+	if cookie, err := request.Cookie("rf_session"); err == nil {
+		user, authenticated, _ := s.auth.UserBySession(request.Context(), cookie.Value)
+		if err := s.auth.Logout(request.Context(), cookie.Value); err != nil {
+			writeProblem(writer, http.StatusServiceUnavailable, "session_store_unavailable", "暂时无法退出登录")
+			return
+		}
+		if authenticated {
+			s.realtime.disconnectUser(user.ID, websocket.StatusPolicyViolation, "account session revoked")
+		}
+	}
+	http.SetCookie(writer, &http.Cookie{
+		Name: "rf_session", Value: "", Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode,
+		Secure: !s.config.Development, MaxAge: -1, Expires: time.Unix(1, 0),
+	})
+	writeJSON(writer, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Server) passwordLogin(writer http.ResponseWriter, request *http.Request) {
@@ -65,7 +131,7 @@ func (s *Server) passwordLogin(writer http.ResponseWriter, request *http.Request
 		writeProblem(writer, http.StatusBadRequest, "invalid_json", "请求格式不正确")
 		return
 	}
-	user, token, err := s.auth.PasswordLogin(input.Account, input.Password, s.config.AdminAccount, s.config.AdminPassword)
+	user, token, err := s.auth.PasswordLogin(request.Context(), input.Account, input.Password, s.config.AdminAccount, s.config.AdminPassword)
 	if err != nil {
 		writeDomainError(writer, err)
 		return
@@ -75,16 +141,53 @@ func (s *Server) passwordLogin(writer http.ResponseWriter, request *http.Request
 		return
 	}
 	s.scores.EnsureUser(user.ID)
-	http.SetCookie(writer, &http.Cookie{
-		Name: "rf_session", Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode,
-		Secure: !s.config.Development, MaxAge: int((30 * 24 * time.Hour).Seconds()),
-	})
+	s.setSessionCookie(writer, token)
 	writeJSON(writer, http.StatusOK, map[string]any{"user": user, "balance": s.scores.Balance(user.ID)})
 }
 
 func (s *Server) me(writer http.ResponseWriter, request *http.Request) {
 	user := currentUser(request)
 	writeJSON(writer, http.StatusOK, map[string]any{"user": user, "balance": s.scores.Balance(user.ID), "activeRoomId": s.rooms.ActiveRoom(user.ID)})
+}
+
+func (s *Server) updateMe(writer http.ResponseWriter, request *http.Request) {
+	var input struct {
+		Nickname string `json:"nickname"`
+	}
+	if err := decodeJSON(request, &input); err != nil {
+		writeProblem(writer, http.StatusBadRequest, "invalid_json", "请求格式不正确")
+		return
+	}
+	user, err := s.auth.UpdateNickname(request.Context(), currentUser(request).ID, input.Nickname)
+	if err != nil {
+		writeDomainError(writer, err)
+		return
+	}
+	if err := s.persistIdentity(request, user); err != nil {
+		writeProblem(writer, http.StatusServiceUnavailable, "identity_store_unavailable", "用户资料暂时无法保存")
+		return
+	}
+	activeRoomID := s.rooms.ActiveRoom(user.ID)
+	if activeRoomID != "" {
+		if actor, ok := s.rooms.Room(activeRoomID); ok {
+			if err := actor.UpdateIdentity(request.Context(), room.Identity{ID: user.ID, Name: user.Nickname}); err != nil {
+				writeProblem(writer, http.StatusServiceUnavailable, "room_profile_unavailable", "昵称已保存，但暂时无法同步到当前房间")
+				return
+			}
+		}
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"user": user, "balance": s.scores.Balance(user.ID), "activeRoomId": activeRoomID})
+}
+
+func (s *Server) persistIdentity(request *http.Request, user auth.User) error {
+	return s.ops.UpsertUser(request.Context(), operations.UserIdentity{ID: user.ID, Phone: user.Phone, Nickname: user.Nickname, CreatedAt: user.CreatedAt})
+}
+
+func (s *Server) setSessionCookie(writer http.ResponseWriter, token string) {
+	http.SetCookie(writer, &http.Cookie{
+		Name: "rf_session", Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode,
+		Secure: !s.config.Development, MaxAge: int((30 * 24 * time.Hour).Seconds()), Expires: time.Now().UTC().Add(30 * 24 * time.Hour),
+	})
 }
 
 func (s *Server) addScore(writer http.ResponseWriter, request *http.Request) {
@@ -95,6 +198,10 @@ func (s *Server) addScore(writer http.ResponseWriter, request *http.Request) {
 	}
 	if err := decodeJSON(request, &input); err != nil {
 		writeProblem(writer, http.StatusBadRequest, "invalid_json", "请求格式不正确")
+		return
+	}
+	if !requestid.Valid(input.RequestID) {
+		writeProblem(writer, http.StatusBadRequest, "invalid_request_id", "请求标识不正确")
 		return
 	}
 	user := currentUser(request)
@@ -121,6 +228,10 @@ func (s *Server) createRoom(writer http.ResponseWriter, request *http.Request) {
 	var config room.Config
 	if err := decodeJSON(request, &config); err != nil {
 		writeProblem(writer, http.StatusBadRequest, "invalid_json", "房间配置格式不正确")
+		return
+	}
+	if err := config.Validate(); err != nil {
+		writeProblem(writer, http.StatusBadRequest, "invalid_room_config", err.Error())
 		return
 	}
 	user := currentUser(request)
@@ -161,11 +272,25 @@ func (s *Server) publicRoom(writer http.ResponseWriter, request *http.Request) {
 		writeDomainError(writer, err)
 		return
 	}
+	if snapshot.Ended {
+		writeProblem(writer, http.StatusNotFound, "room_not_found", "房间不存在或已结束")
+		return
+	}
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"id": snapshot.RoomID, "code": snapshot.RoomCode, "name": snapshot.RoomName,
-		"ownerId": snapshot.OwnerID, "ownerName": ownerName(snapshot), "onlinePlayers": len(snapshot.Players), "maxPlayers": snapshot.Config.MaxPlayers,
+		"ownerId": snapshot.OwnerID, "ownerName": ownerName(snapshot), "onlinePlayers": onlinePlayerCount(snapshot.Players), "maxPlayers": snapshot.Config.MaxPlayers,
 		"config": snapshot.Config, "occupiedSeats": occupiedSeats(snapshot.Players),
 	})
+}
+
+func onlinePlayerCount(players []room.PlayerSnapshot) int {
+	count := 0
+	for _, player := range players {
+		if player.Status != "disconnected" {
+			count++
+		}
+	}
+	return count
 }
 
 func ownerName(snapshot room.TableSnapshot) string {
@@ -215,6 +340,7 @@ func (s *Server) roomCommand(writer http.ResponseWriter, request *http.Request) 
 		writeDomainError(writer, err)
 		return
 	}
+	s.disconnectDepartedUsers(event)
 	writeJSON(writer, http.StatusOK, map[string]any{"event": event, "duplicate": duplicate})
 }
 
@@ -225,8 +351,13 @@ func (s *Server) voiceToken(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	user := currentUser(request)
-	if _, err := actor.Snapshot(request.Context(), user.ID); err != nil {
+	snapshot, err := actor.Snapshot(request.Context(), user.ID)
+	if err != nil {
 		writeDomainError(writer, err)
+		return
+	}
+	if !snapshot.Config.VoiceEnabled {
+		writeJSON(writer, http.StatusOK, voice.Token{Enabled: false, Reason: "这个房间没有开启语音"})
 		return
 	}
 	token, err := s.config.Voice.Issue(user.ID, user.Nickname, actor.ID, time.Now())
@@ -252,7 +383,7 @@ func (s *Server) resetScores(writer http.ResponseWriter, request *http.Request) 
 		writeProblem(writer, http.StatusBadRequest, "invalid_json", "重置请求格式不正确")
 		return
 	}
-	if input.Confirmation != "RESET ALL SCORES" || input.RequestID == "" {
+	if input.Confirmation != "RESET ALL SCORES" || !requestid.Valid(input.RequestID) {
 		writeProblem(writer, http.StatusBadRequest, "confirmation_required", "请输入 RESET ALL SCORES 并提供 requestId")
 		return
 	}

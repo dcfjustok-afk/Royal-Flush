@@ -58,6 +58,9 @@ services:
       LIVEKIT_URL: ${LIVEKIT_URL:-ws://localhost:7880}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-secretsecretsecretsecretsecretsecret}
+      VOICE_ICE_URLS: ${VOICE_ICE_URLS:-stun:stun.l.google.com:19302}
+      VOICE_TURN_USERNAME: ${VOICE_TURN_USERNAME:-}
+      VOICE_TURN_CREDENTIAL: ${VOICE_TURN_CREDENTIAL:-}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174}
       ADMIN_USER_IDS: ${ADMIN_USER_IDS:-local-admin}
       INSTANCE_ID: ${INSTANCE_ID:-local-compose-1}

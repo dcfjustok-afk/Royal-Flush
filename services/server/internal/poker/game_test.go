@@ -1,6 +1,7 @@
 package poker
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/cardrank/cardrank"
@@ -39,6 +40,8 @@ func TestHeadsUpBlindsAndActionOrder(t *testing.T) {
 	game, _ := NewGame(8, 5, 10)
 	_, _ = game.Sit("u1", "一号", 0, "s1")
 	_, _ = game.Sit("u2", "二号", 4, "s2")
+	game.Seats[0].Ready = true
+	game.Seats[4].Ready = true
 	if err := game.StartHand(); err != nil {
 		t.Fatal(err)
 	}
@@ -47,6 +50,56 @@ func TestHeadsUpBlindsAndActionOrder(t *testing.T) {
 	}
 	if len(game.Seats[0].Hole) != 2 || len(game.Seats[4].Hole) != 2 {
 		t.Fatal("players did not receive exactly two cards")
+	}
+}
+
+func TestStartHandExcludesUnreadyAndDisconnectedPlayers(t *testing.T) {
+	game, _ := NewGame(4, 5, 10)
+	_, _ = game.Sit("owner", "房主", 0, "s1")
+	_, _ = game.Sit("ready", "已准备", 1, "s2")
+	_, _ = game.Sit("unready", "未准备", 2, "s3")
+	_, _ = game.Sit("offline", "已断线", 3, "s4")
+	game.Seats[0].Ready = true
+	game.Seats[1].Ready = true
+	game.Seats[3].Ready = true
+	game.Seats[3].Disconnected = true
+
+	if err := game.StartHand(); err != nil {
+		t.Fatal(err)
+	}
+	if len(game.Seats[0].Hole) != 2 || len(game.Seats[1].Hole) != 2 {
+		t.Fatal("ready connected players did not receive cards")
+	}
+	for _, seat := range []int{2, 3} {
+		if len(game.Seats[seat].Hole) != 0 || game.Seats[seat].HandCommitted != 0 {
+			t.Fatalf("ineligible seat %d joined the hand: %#v", seat, game.Seats[seat])
+		}
+	}
+}
+
+func TestFoldAwardsPotOnlyToAPlayerDealtIntoTheHand(t *testing.T) {
+	game, _ := NewGame(3, 5, 10)
+	_, _ = game.Sit("spectator", "旁观者", 0, "s1")
+	_, _ = game.Sit("ready-one", "玩家一", 1, "s2")
+	_, _ = game.Sit("ready-two", "玩家二", 2, "s3")
+	game.Seats[1].Ready = true
+	game.Seats[2].Ready = true
+	if err := game.StartHand(); err != nil {
+		t.Fatal(err)
+	}
+	actor := game.Actor
+	winner := map[int]int{1: 2, 2: 1}[actor]
+	if err := game.Fold(actor); err != nil {
+		t.Fatal(err)
+	}
+	if game.Seats[0].Stack != 1000 {
+		t.Fatalf("spectator received the pot: stack=%d", game.Seats[0].Stack)
+	}
+	if game.Seats[winner].Stack <= 1000 {
+		t.Fatalf("remaining participant did not receive the pot: seat=%d stack=%d", winner, game.Seats[winner].Stack)
+	}
+	if game.Pot() != 0 {
+		t.Fatalf("settled pot was not cleared: %d", game.Pot())
 	}
 }
 
@@ -77,6 +130,32 @@ func TestCumulativeShortAllInsReopenRaise(t *testing.T) {
 	}
 }
 
+func TestSingleShortAllInDoesNotReopenAnAllInRaise(t *testing.T) {
+	game, _ := NewGame(2, 5, 10)
+	game.Street = StreetPreflop
+	game.CurrentBet = 100
+	game.MinimumRaiseBy = 100
+	game.Actor = 1
+	game.pending = map[int]bool{0: true, 1: true}
+	game.actedAtBet = map[int]int64{0: 100}
+	game.deck = NewDeck()
+	game.Seats[0] = &Player{Seat: 0, UserID: "a", Stack: 500, StreetCommitted: 100, HandCommitted: 100, Hole: cards("Ah", "Kd")}
+	game.Seats[1] = &Player{Seat: 1, UserID: "b", Stack: 50, StreetCommitted: 100, HandCommitted: 100, Hole: cards("Qh", "Jd")}
+
+	if err := game.AllIn(1); err != nil {
+		t.Fatal(err)
+	}
+	if game.Actor != 0 || game.CanRaise(0) || game.CanAllIn(0) {
+		t.Fatalf("single short all-in incorrectly reopened raising: %s", game.DebugState())
+	}
+	if err := game.AllIn(0); !errors.Is(err, ErrIllegalAction) {
+		t.Fatalf("expected all-in re-raise to be rejected, got %v", err)
+	}
+	if err := game.CheckOrCall(0); err != nil {
+		t.Fatalf("calling the short raise should remain legal: %v", err)
+	}
+}
+
 func TestSidePotsAndOddPointDistribution(t *testing.T) {
 	game, _ := NewGame(3, 5, 10)
 	game.Button = 0
@@ -103,6 +182,59 @@ func TestSidePotsAndOddPointDistribution(t *testing.T) {
 	if odd.Seats[2].Stack != 8 || odd.Seats[0].Stack != 7 {
 		t.Fatalf("odd point should go to first winner left of button: seat0=%d seat2=%d", odd.Seats[0].Stack, odd.Seats[2].Stack)
 	}
+}
+
+func TestSeatLifecycleAndTimeoutMatrix(t *testing.T) {
+	t.Run("refill disconnect withdraw and remove", func(t *testing.T) {
+		game, err := NewGame(2, 5, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		player, err := game.Sit("u1", "玩家一", 0, "seat-u1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		player.Stack = 0
+		player.Away = true
+		if err := game.Refill(0); err != nil || player.Stack != 1000 || player.Allocated != 2000 || player.Away {
+			t.Fatalf("refill result player=%#v err=%v", player, err)
+		}
+		if err := game.SetDisconnected(0, true); err != nil || !player.Disconnected {
+			t.Fatalf("disconnect result player=%#v err=%v", player, err)
+		}
+		if err := game.Withdraw(0); err != nil || !player.Leaving || !player.Away || player.Disconnected {
+			t.Fatalf("withdraw result player=%#v err=%v", player, err)
+		}
+		removed, err := game.RemoveSeat(0)
+		if err != nil || removed.UserID != "u1" || game.Seats[0] != nil {
+			t.Fatalf("remove result player=%#v err=%v", removed, err)
+		}
+	})
+
+	t.Run("timeout resolves current action", func(t *testing.T) {
+		game, err := NewGame(2, 5, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		first, _ := game.Sit("u1", "玩家一", 0, "seat-u1")
+		second, _ := game.Sit("u2", "玩家二", 1, "seat-u2")
+		first.Ready = true
+		second.Ready = true
+		if err := game.StartHand(); err != nil {
+			t.Fatal(err)
+		}
+		seat := game.Actor
+		toCall := game.ToCall(seat)
+		if err := game.Timeout(seat); err != nil {
+			t.Fatal(err)
+		}
+		if toCall > 0 && !game.Seats[seat].Folded {
+			t.Fatal("timeout with chips to call did not fold the actor")
+		}
+		if toCall == 0 && game.Seats[seat].Folded {
+			t.Fatal("timeout with no chips to call folded instead of checking")
+		}
+	})
 }
 
 func cards(values ...string) []Card {
